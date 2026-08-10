@@ -6,6 +6,7 @@ This is the authoritative, persistent project context for every coding agent.
 Related files:
 
 - `plan.md` — full milestone definitions and acceptance criteria
+- `docs/PRODUCT_SPEC.md` — frozen MVP behavioral contract (flows, edge cases, rules)
 - `docs/ARCHITECTURE.md` — system design
 - `docs/DOMAIN_MODEL.md` — entities, states, relationships
 - `docs/API_CONTRACT.md` — planned API surface
@@ -43,6 +44,9 @@ The application is intended for **real use at school**, not just a portfolio dem
   enter a nickname, and submit YouTube URLs. They can watch the queue and their position.
 
 ## 3. Core user journeys
+
+Detailed flows, screens, edge cases, and normative behavioral rules are frozen in
+**`docs/PRODUCT_SPEC.md`** (M1). The short versions:
 
 ### Host
 
@@ -115,7 +119,8 @@ See `docs/DOMAIN_MODEL.md` for full detail. High-level:
 - **Session** — one karaoke night. Contains multiple rounds. Has a join code / QR link.
 - **Participant** — session-scoped identity (nickname). No account. Created by joining.
 - **Round** — one pass through the queue within a session.
-- **QueueEntry** — a participant's song in a round, with status and position.
+- **QueueEntry** — a participant's song in a round, with status and a *computed*
+  position (derived from authoritative order, never stored as a mutable field).
 - **YouTubeVideo** — metadata snapshot (video ID, URL, title, channel, duration, thumbnail).
 
 ```text
@@ -134,6 +139,9 @@ Host
 
 ## 7. Important business rules
 
+The normative, implementer-facing rules are in `docs/PRODUCT_SPEC.md` §9
+(rules B1–B18). The high-level rules below remain the canonical summary:
+
 1. Only authenticated hosts can create/manage sessions.
 2. Anyone with the session QR/link can join. Participants need no account.
 3. Participants can cancel their own waiting entries; they cannot modify others'.
@@ -151,13 +159,22 @@ Host
 12. Host actions must be authorized server-side.
 13. The application must remain usable if realtime connections temporarily fail.
 
+Additional M1 decisions (duplicate songs allowed, nickname rules, active-entry
+limit, sessions not tied to a browser) are in `docs/PRODUCT_SPEC.md` §8–§9 and
+`docs/DECISIONS.md` D15–D20.
+
 ## 8. Current milestone
 
-**M1 — Product Specification + UX** (next). M0 is complete; see
+**M2 — Backend Skeleton + Database** (next). M1 is complete; see
 `docs/DEV_BRAIN.md` for live status.
 
 ## 9. Completed milestones
 
+- **M1 — Product Specification + UX** (complete): MVP behavior frozen in
+  `docs/PRODUCT_SPEC.md` — roles and authority matrix, session/round lifecycles,
+  detailed host and participant flows, screen inventory, 24 edge cases (E1–E24),
+  and normative behavioral rules B1–B18. Behavioral decisions D14–D20 recorded in
+  `docs/DECISIONS.md`.
 - **M0 — Repository + Project Brain** (complete): repository layout, backend
   (FastAPI + health check), frontend (Vite + React + TS scaffold), and the full
   documentation set under `docs/`. Backend and frontend both start; no business
@@ -181,6 +198,9 @@ See `docs/DECISIONS.md` for the full, maintained list. Highlights:
 - Participants are session-scoped identities, not accounts.
 - Do not over-validate YouTube content (validate format, warn on length, never auto-reject).
 - Redis is not required for the first deployment.
+- MVP behavior is frozen in `docs/PRODUCT_SPEC.md` (M1): duplicates allowed,
+  nickname rules, active-entry limit, deterministic round ordering, sessions not
+  tied to a browser connection.
 - No user-visible feature in M0 beyond a health check.
 
 ## 12. Commands for running / testing

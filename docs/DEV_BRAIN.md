@@ -7,65 +7,58 @@ of every milestone. The persistent context lives in `PROJECT_BRAIN.md`.
 
 ## Current milestone
 
-**M0 — Repository + Project Brain** — COMPLETE (verified).
+**M1 — Product Specification + UX** — COMPLETE (verified).
 
 ## Current task
 
-None (milestone finished). Next milestone: **M1 — Product Specification + UX**.
+None (milestone finished). Next milestone: **M2 — Backend Skeleton + Database**.
 
-## Verification results (M0 acceptance criteria)
+## Verification results (M1 acceptance criteria)
 
-| Acceptance criterion          | Result                                                        |
-| ----------------------------- | ------------------------------------------------------------- |
-| Fresh clone can be opened     | Yes — docs + README + plan.md explain the project             |
-| Documentation explains project| Yes — 7 docs under `docs/` (see below)                        |
-| Backend starts                | Verified — `uvicorn app.main:app` serves `/` and `/health`    |
-| Frontend starts               | Verified — `vite` dev server serves the app                  |
-| No business functionality     | Yes — only a health endpoint and a placeholder screen         |
+| Acceptance criterion (plan.md §M1)                          | Result |
+| ----------------------------------------------------------- | ------ |
+| User flows documented clearly enough to implement without guessing | Yes — `docs/PRODUCT_SPEC.md` §5 (host), §6 (participant), detailed step-by-step with screen inventory §7 |
+| Business rules documented clearly enough to implement without guessing | Yes — normative rules B1–B18 (§9) + 24 edge cases E1–E24 (§8) + playback/automation spec (§10) |
+| All 17 required edge cases from plan.md covered | Yes — every one appears in the catalog (E1–E17 map 1:1; E19–E21 add the plan.md §M18 concurrency scenarios; E18/E22–E24 add robustness cases consistent with §M18) |
 
-Checks run:
+Coverage map (plan.md §M1 edge cases -> spec): duplicate song E1, participant
+leaves E2, invalid URL E3, video unavailable E4, video unavailable after submission
+E5, host removes participant E6, host edits song E7, participant refreshes E8,
+participant loses internet E9, host loses internet E10, host closes browser E11,
+song ends E12, host skips E13, host manually advances E14, queue empty E15,
+round ends E16, no next-round answer E17.
 
-- `uv run pytest` — 2 passed.
+Checks run (no code changed in M1 — documentation only):
+
+- `uv run pytest` — 2 passed (unchanged).
 - `uv run pyright` — 0 errors, 0 warnings.
-- `npm run typecheck` — clean.
-- `npm run lint` — clean.
-- `npm run build` — succeeds.
+- `npm run typecheck` — clean. `npm run lint` — clean.
+- Confirmed on `dev`, working tree contained only the intended doc edits.
 
-## Files changed (M0)
+## Files changed (M1)
 
 ```text
-docs/PROJECT_BRAIN.md     (new)
-docs/ARCHITECTURE.md      (new)
-docs/DOMAIN_MODEL.md      (new)
-docs/API_CONTRACT.md      (new)
-docs/DECISIONS.md         (new)
-docs/RUNBOOK.md           (new)
-docs/DEV_BRAIN.md         (new, this file)
-backend/                  (new — minimal FastAPI app + tests)
-frontend/                 (new — Vite + React + TypeScript scaffold)
-README.md                 (updated)
-.gitignore                (verified/extended)
+docs/PRODUCT_SPEC.md    (new — frozen MVP behavioral contract)
+docs/DECISIONS.md       (updated — M1 decisions D14–D20)
+docs/PROJECT_BRAIN.md   (updated — related files, journeys pointer, milestone status)
+docs/DEV_BRAIN.md       (updated, this file)
 ```
 
-## Implementation notes (M0)
+## Implementation notes (M1)
 
-- Repository was already initialized with the agent workflow files (`AGENTS.md`,
-  `opencode.json`, `.opencode/`); M0 adds the project structure on top.
-- Backend is deliberately minimal: a FastAPI app with `/` and `/health` endpoints
-  and a pytest suite. Database, config (Pydantic Settings), logging, and layering
-  are M2 work and must NOT be built here.
-- Frontend is the standard Vite + React + TypeScript scaffold with a placeholder
-  screen. No app logic.
-- Pydantic response models are used even for the health endpoint to establish the
-  Pydantic-at-boundary convention from the start.
-- Pyright is configured for static type checking and must pass.
-- Python version: project targets 3.12+; the backend venv is pinned to 3.12 via
-  `backend/.python-version` (system Python is newer — 3.14).
+- M1 is a documentation milestone by design (plan.md §M1). No backend/frontend
+  code was touched; the existing scaffolds are unchanged.
+- The spec is deliberately concrete so later milestones (M2–M17) can implement
+  without guessing: concrete defaults (active-entry limit 2, cooldown 10 s,
+  countdown 20 s, nickname 1–20 chars unique per session) and deterministic rules
+  (round ordering, skip vs. advance).
+- Behavioral decisions were recorded in DECISIONS.md D14–D20 so the rationale is
+  preserved (no silent redesign in later milestones).
 
-## Tests added (M0)
+## Tests added (M1)
 
-- `backend/tests/test_health.py` — verifies `/health` and `/` return 200 with the
-  expected shape. **Passing (2 tests).**
+- None (documentation milestone). The M1 acceptance criterion is document quality;
+  verified via the coverage map above and cross-doc consistency.
 
 ## Current blockers
 
@@ -73,11 +66,14 @@ README.md                 (updated)
 
 ## Unresolved technical questions
 
-- None for M0. Future questions are tracked in `docs/DECISIONS.md` (Open questions).
-- Note: starlette emits a deprecation warning about `httpx` vs `httpx2` in
-  `fastapi.testclient` (starlette 1.6). Non-blocking; revisit if it becomes an error.
+- Tracked in `docs/DECISIONS.md` (Open questions): host auth mechanism (M3),
+  YouTube metadata source (M6), realtime payload schemas (M10), Web Push choice
+  (M15). None block M2.
+- Starlette deprecation warning (`httpx` vs `httpx2` in `fastapi.testclient`) —
+  non-blocking, tracked since M0.
 
 ## Next recommended task
 
-**M1 — Product Specification + UX** — freeze the MVP behavior and edge cases
-before implementing functionality (see `plan.md` §M1).
+**M2 — Backend Skeleton + Database** — FastAPI + SQLAlchemy 2.x + PostgreSQL +
+Alembic + Pydantic Settings + structured logging + health endpoint + project layers
+(see `plan.md` §M2). The backend layout target is in `docs/ARCHITECTURE.md` §3.

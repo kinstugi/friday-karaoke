@@ -126,6 +126,79 @@ be appended as the project evolves.
 
 ---
 
+## M1 behavioral decisions (product specification)
+
+These freeze MVP product behavior. They were captured in `docs/PRODUCT_SPEC.md`.
+
+### D14. Frozen product specification document (M1)
+
+- **Status:** Accepted
+- **Decision:** `docs/PRODUCT_SPEC.md` is the single behavioral contract for the
+  MVP: roles/authority matrix, session and round lifecycles, detailed host and
+  participant flows, screen inventory, edge-case catalog, normative behavioral
+  rules, and playback/automation behavior.
+- **Rationale:** plan.md §M1 requires the flows and business rules to be documented
+  clearly enough that another developer can implement them without guessing. One
+  canonical document avoids drift between flows/edge cases/rules.
+
+### D15. Duplicate songs are allowed
+
+- **Status:** Accepted
+- **Decision:** Two participants may queue the same video. The submitter sees an
+  informational notice ("This song is already in the queue") but the entry is never
+  blocked.
+- **Rationale:** Consistent with "do not over-validate" (D7) — each participant
+  queues their own song; blocking duplicates adds friction without a real need.
+
+### D16. Nickname rules
+
+- **Status:** Accepted
+- **Decision:** Nicknames are required, trimmed, 1–20 characters, and unique per
+  session (case-insensitive). Violations block submission with a clear message.
+- **Rationale:** Uniqueness avoids ambiguity on the host dashboard ("two Emmas")
+  without requiring participant accounts. Length limits support M17 abuse protection.
+
+### D17. Active-entry limit per participant
+
+- **Status:** Accepted
+- **Decision:** A participant may have at most **2 non-terminal entries**
+  (WAITING + NEXT + SINGING) in the current round. Further submissions are
+  rejected with a clear message.
+- **Rationale:** plan.md §M7 requires a reasonable active-entry limit. A concrete
+  number avoids implementer guessing; enforcement is hardened in M17.
+
+### D18. Sessions are not tied to a live browser connection
+
+- **Status:** Accepted
+- **Decision:** Closing the host's browser (or losing connectivity) does not end or
+  pause the session. The session persists in the backend; the host reopens the
+  dashboard and re-syncs.
+- **Rationale:** Host machines/browsers crash; the backend is the source of truth
+  (D2). Tying session lifetime to a socket would make the whole night fragile.
+
+### D19. Round transition behavior
+
+- **Status:** Accepted
+- **Decision:** A round completes when the queue has no remaining non-terminal
+  entries. The session enters `ROUND_COMPLETE`, the enrollment prompt opens
+  (default YES, explicit NO excludes), and the host starts the next round or ends
+  the session. Next-round queue order is deterministic: explicit YES answers in
+  arrival order, then default-YES participants in creation order, resolved at round
+  start.
+- **Rationale:** Deterministic, backend-computed ordering avoids races (E19) and
+  gives participants an immediate position in the new round.
+
+### D20. Skip vs. manually advance
+
+- **Status:** Accepted
+- **Decision:** "Skip" marks the current entry `SKIPPED` and advances immediately;
+  "manually advance" marks it `COMPLETED` and advances immediately. Both bypass
+  remaining automation. "Pause" holds automation after the current song.
+- **Rationale:** Gives the host two distinct, meaningful actions (singer cut short
+  vs. singer done early) while keeping the state machine simple and explicit.
+
+---
+
 ## Open questions (tracked)
 
 - Authentication mechanism for hosts (email/password vs. school SSO) — M3.
