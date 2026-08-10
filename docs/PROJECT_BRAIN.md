@@ -1,0 +1,223 @@
+# PROJECT_BRAIN.md — Friday Karaoke
+
+This is the authoritative, persistent project context for every coding agent.
+**Read this file before modifying the project.**
+
+Related files:
+
+- `plan.md` — full milestone definitions and acceptance criteria
+- `docs/ARCHITECTURE.md` — system design
+- `docs/DOMAIN_MODEL.md` — entities, states, relationships
+- `docs/API_CONTRACT.md` — planned API surface
+- `docs/DECISIONS.md` — architectural decisions (and why)
+- `docs/DEV_BRAIN.md` — active development context (current task)
+- `docs/RUNBOOK.md` — local development commands
+
+---
+
+## 1. Product purpose
+
+A private karaoke queue application for our school's Friday karaoke nights.
+It removes the repetitive work currently done by the host:
+
+1. Host creates a karaoke session.
+2. Application generates a QR code.
+3. Students scan the QR code.
+4. Students enter a nickname and paste the YouTube URL of the song they want.
+5. The application fetches/displays the video metadata and puts the entry in the queue.
+6. Everyone can see the current queue and their position.
+7. The host has final control over the queue and playback.
+8. The host's browser is the playback device (connected to the school's screen/speakers).
+9. Songs transition automatically, with configurable preparation/cooldown time.
+10. The next singer is notified.
+11. When a round ends, participants are asked whether they want to join the next round.
+    Default: YES if they do nothing.
+
+The application is intended for **real use at school**, not just a portfolio demo.
+
+## 2. Target users
+
+- **Host** — the person who runs the Friday karaoke night (teacher/student organizer).
+  Has an account, creates/manages sessions, has final authority over the queue and playback.
+- **Participants** — students who attend. **No account required.** They scan the QR code,
+  enter a nickname, and submit YouTube URLs. They can watch the queue and their position.
+
+## 3. Core user journeys
+
+### Host
+
+```text
+Login
+  -> Create session
+  -> Display QR
+  -> Monitor queue
+  -> Start / skip / edit / remove
+  -> Automatic playback (host browser is the playback device)
+  -> Finish round
+  -> Start next round
+  -> End session
+```
+
+### Participant
+
+```text
+Scan QR
+  -> Enter nickname
+  -> Paste YouTube URL
+  -> Review song metadata
+  -> Join queue
+  -> Monitor position
+  -> Receive "you're next"
+  -> Perform
+  -> Participate in next round (default YES)
+```
+
+## 4. Current architecture (summary)
+
+- One **modular monolith** backend (FastAPI + PostgreSQL). No microservices.
+- Backend/database is the **single source of truth** for queue order, current singer,
+  round state, playback state, permissions, participant identity, and session state.
+- Frontend is a React + TypeScript SPA (Vite). It never owns authoritative state.
+- Realtime delivery via **FastAPI WebSockets** (planned M10). WebSockets are a delivery
+  mechanism, **not** the source of truth; clients resync from the backend after reconnect.
+- The **host's browser is the playback device** (YouTube embedded player).
+  Participants' phones never play the song.
+
+See `docs/ARCHITECTURE.md` for details.
+
+## 5. Technology stack
+
+| Concern          | Choice                          |
+| ---------------- | ------------------------------- |
+| Backend          | Python 3.12+ / FastAPI          |
+| Database         | PostgreSQL                      |
+| ORM              | SQLAlchemy 2.x                  |
+| Migrations       | Alembic                         |
+| Realtime         | FastAPI WebSockets              |
+| Frontend         | React + TypeScript              |
+| Build tooling    | Vite                            |
+| PWA              | web manifest + service worker   |
+| Containers       | Docker / Docker Compose         |
+| Reverse proxy    | Caddy or Nginx                  |
+| Notifications    | Web Push                        |
+| Testing          | pytest + integration tests      |
+| Dependency mgmt  | uv (preferred)                  |
+| Validation       | Pydantic v2                      |
+| Settings         | Pydantic Settings               |
+| ASGI server      | Uvicorn                          |
+| Static types     | Pyright or mypy                  |
+
+## 6. Domain concepts
+
+See `docs/DOMAIN_MODEL.md` for full detail. High-level:
+
+- **Host** — account holder with authority over sessions.
+- **Session** — one karaoke night. Contains multiple rounds. Has a join code / QR link.
+- **Participant** — session-scoped identity (nickname). No account. Created by joining.
+- **Round** — one pass through the queue within a session.
+- **QueueEntry** — a participant's song in a round, with status and position.
+- **YouTubeVideo** — metadata snapshot (video ID, URL, title, channel, duration, thumbnail).
+
+```text
+Host
+ |
+ +---- Session
+          |
+          +---- Participant
+          |
+          +---- Round
+                  |
+                  +---- QueueEntry
+                          |
+                          +---- YouTubeVideo
+```
+
+## 7. Important business rules
+
+1. Only authenticated hosts can create/manage sessions.
+2. Anyone with the session QR/link can join. Participants need no account.
+3. Participants can cancel their own waiting entries; they cannot modify others'.
+4. Host has final authority over the queue (remove any entry, edit YouTube URLs, skip,
+   pause/resume, advance manually, end the session).
+5. Invalid YouTube URLs cannot be queued. Long videos produce a **warning**, not a rejection.
+6. Queue order is determined by authoritative backend state (creation order), not a
+   mutable position field.
+7. Host playback is authoritative for actual song playback.
+8. Automatic advancement can always be overridden by the host.
+9. A session contains multiple rounds (do not create a new session per round).
+10. At round completion, participants are asked whether they want the next round.
+    Default answer is YES; an explicit NO excludes them from the next round.
+11. Realtime events are not authoritative state. Reconnecting clients must resync.
+12. Host actions must be authorized server-side.
+13. The application must remain usable if realtime connections temporarily fail.
+
+## 8. Current milestone
+
+**M1 — Product Specification + UX** (next). M0 is complete; see
+`docs/DEV_BRAIN.md` for live status.
+
+## 9. Completed milestones
+
+- **M0 — Repository + Project Brain** (complete): repository layout, backend
+  (FastAPI + health check), frontend (Vite + React + TS scaffold), and the full
+  documentation set under `docs/`. Backend and frontend both start; no business
+  functionality exists yet.
+
+## 10. Known limitations
+
+- No business functionality yet (M0 is scaffolding + documentation only).
+- No database, authentication, realtime, or playback implemented yet.
+- Browser autoplay policies will require host interaction before audio playback
+  (to be designed for in M12/M13).
+
+## 11. Important decisions
+
+See `docs/DECISIONS.md` for the full, maintained list. Highlights:
+
+- Modular monolith; no microservices/Kafka/Kubernetes unless a concrete requirement appears.
+- Backend is the single source of truth; frontend never owns state.
+- Host browser is the playback device.
+- WebSockets deliver events but never replace authoritative state.
+- Participants are session-scoped identities, not accounts.
+- Do not over-validate YouTube content (validate format, warn on length, never auto-reject).
+- Redis is not required for the first deployment.
+- No user-visible feature in M0 beyond a health check.
+
+## 12. Commands for running / testing
+
+See `docs/RUNBOOK.md`. Short version:
+
+```bash
+# Backend
+cd backend
+uv sync
+uv run uvicorn app.main:app --reload     # starts API at http://localhost:8000
+uv run pytest                            # tests
+uv run pyright                           # static type check
+
+# Frontend
+cd frontend
+npm install
+npm run dev                              # starts Vite dev server
+npm run build                            # production build
+npm run typecheck                        # tsc --noEmit
+```
+
+## 13. Things explicitly NOT to build (v1 non-goals)
+
+- Spotify integration, song streaming service, custom karaoke music hosting
+- AI recommendations / AI singing analysis
+- Voting, leaderboards, payments/tipping
+- Public/multi-venue management, public discovery of sessions
+- Microservices, Kubernetes, Kafka, RabbitMQ, event sourcing
+- Complex analytics, social profiles
+
+These may be reconsidered only after the real school deployment proves the core product.
+
+## 14. Agent rules reminder
+
+- Work on `dev`. Never commit directly to `master`.
+- Implement only the assigned milestone; no scope creep.
+- Python typing rules (Pydantic v2 at boundaries, `Enum` for states, explicit types,
+  static checks passing) apply to every milestone.
+- At milestone completion: tests pass, docs updated, acceptance criteria verified.
