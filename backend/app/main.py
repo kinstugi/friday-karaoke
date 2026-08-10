@@ -1,45 +1,32 @@
 """Friday Karaoke backend application entry point.
 
-M0 status: minimal FastAPI app so the backend can start. Business
-functionality (auth, sessions, queue, playback) arrives in later
-milestones. The Pydantic response model establishes the
-Pydantic-at-API-boundary convention used throughout the project.
+M2 status: backend skeleton. Configuration uses Pydantic Settings
+(``app.core.config``), logging is structured JSON (``app.core.logging``),
+and the database layer is async SQLAlchemy (``app.core.database``).
+Business functionality (auth, sessions, queue, playback) arrives in later
+milestones.
 """
 
 from fastapi import FastAPI
-from pydantic import BaseModel
 
 from app import __version__
-
-SERVICE_NAME = "friday-karaoke-backend"
-
-
-class ServiceInfo(BaseModel):
-    """Response model for the root and health endpoints."""
-
-    service: str
-    status: str
-    version: str
+from app.api.routes import health
+from app.core.config import get_settings
+from app.core.logging import setup_logging
 
 
-app = FastAPI(
-    title="Friday Karaoke API",
-    description="Backend for the private school karaoke queue application.",
-    version=__version__,
-)
+def create_app() -> FastAPI:
+    """Build and configure the FastAPI application."""
+    settings = get_settings()
+    setup_logging(settings)
+
+    application = FastAPI(
+        title=settings.app_name,
+        description="Backend for the private school karaoke queue application.",
+        version=__version__,
+    )
+    application.include_router(health.router)
+    return application
 
 
-def _service_info(status: str) -> ServiceInfo:
-    return ServiceInfo(service=SERVICE_NAME, status=status, version=__version__)
-
-
-@app.get("/", response_model=ServiceInfo)
-def root() -> ServiceInfo:
-    """Service identity endpoint, used to verify the API is running."""
-    return _service_info(status="ok")
-
-
-@app.get("/health", response_model=ServiceInfo)
-def health() -> ServiceInfo:
-    """Liveness check used by local tooling and, later, Docker health checks."""
-    return _service_info(status="ok")
+app = create_app()

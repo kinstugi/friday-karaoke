@@ -5,21 +5,28 @@ description = "FastAPI backend for the Friday Karaoke private school karaoke que
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "alembic>=1.13",
+    "asyncpg>=0.31.0",
     "fastapi>=0.115",
+    "pydantic-settings>=2.3",
+    "sqlalchemy[asyncio]>=2.0",
     "uvicorn[standard]>=0.32",
 ]
 
 [dependency-groups]
 dev = [
+    "aiosqlite>=0.20",
     "httpx>=0.28.1",
     "pyright>=1.1.411",
     "pytest>=9.1.1",
+    "pytest-asyncio>=0.24",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-q"
+asyncio_mode = "auto"
 
 [tool.pyright]
 pythonVersion = "3.12"

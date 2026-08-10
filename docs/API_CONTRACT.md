@@ -1,8 +1,8 @@
 # API_CONTRACT.md — Friday Karaoke
 
-Planned API surface for v1. **Status: PLANNED.** No endpoints are implemented in M0
-(the backend serves only a health check). Endpoints will be implemented milestone by
-milestone and this document will be updated to reflect reality.
+Planned API surface for v1. **Status: PARTIALLY IMPLEMENTED.** The health
+endpoints (M0/M2) are live; everything else is planned and will be implemented
+milestone by milestone. This document is updated to reflect reality.
 
 All structured request/response bodies are Pydantic v2 models. Domain states use
 Python `Enum` types, never free-form strings. `id`s are UUIDs.
@@ -24,15 +24,24 @@ Python `Enum` types, never free-form strings. `id`s are UUIDs.
   - Participant endpoints require the participant's opaque token (M5).
 - Responses shown below are target shapes and may evolve.
 
-## 1. Health (M0)
+## 1. Health (M0/M2)
 
-| Method | Path      | Auth | Description        |
-| ------ | --------- | ---- | ------------------ |
-| GET    | /health   | none | Liveness check     |
-| GET    | /         | none | Service identity   |
+| Method | Path            | Auth | Description                            |
+| ------ | --------------- | ---- | -------------------------------------- |
+| GET    | /               | none | Service identity (liveness)            |
+| GET    | /health         | none | Liveness check                         |
+| GET    | /health/ready   | none | Readiness: probes the database (200/503)|
 
 ```text
+GET /health
 200 { "service": "friday-karaoke-backend", "status": "ok", "version": "0.1.0" }
+
+GET /health/ready   (database reachable)
+200 { "service": "friday-karaoke-backend", "status": "ok", "version": "0.1.0",
+      "components": { "database": "ok" } }
+
+GET /health/ready   (database unreachable)
+503 { "detail": "database unavailable" }
 ```
 
 ## 2. Host auth (M3)

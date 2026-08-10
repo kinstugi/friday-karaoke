@@ -165,11 +165,18 @@ limit, sessions not tied to a browser) are in `docs/PRODUCT_SPEC.md` §8–§9 a
 
 ## 8. Current milestone
 
-**M2 — Backend Skeleton + Database** (next). M1 is complete; see
+**M3 — Host Authentication** (next). M2 is complete; see
 `docs/DEV_BRAIN.md` for live status.
 
 ## 9. Completed milestones
 
+- **M2 — Backend Skeleton + Database** (complete): FastAPI app factory, async
+  SQLAlchemy 2.x + asyncpg, PostgreSQL via Docker Compose (`compose.yaml`), Alembic
+  migrations (async env, initial revision), Pydantic Settings (`KARAOKE_` prefix),
+  structured JSON logging, project layers (api/core/models/schemas + empty
+  domain/services/repositories), and health endpoints (`/`, `/health`,
+  `/health/ready` with a database probe). Tests run self-contained on SQLite;
+  verified against real PostgreSQL locally.
 - **M1 — Product Specification + UX** (complete): MVP behavior frozen in
   `docs/PRODUCT_SPEC.md` — roles and authority matrix, session/round lifecycles,
   detailed host and participant flows, screen inventory, 24 edge cases (E1–E24),
@@ -182,10 +189,13 @@ limit, sessions not tied to a browser) are in `docs/PRODUCT_SPEC.md` §8–§9 a
 
 ## 10. Known limitations
 
-- No business functionality yet (M0 is scaffolding + documentation only).
-- No database, authentication, realtime, or playback implemented yet.
+- No business functionality yet (auth, sessions, queue, playback land from M3).
+- No domain tables exist yet (the initial migration anchors the Alembic chain;
+  tables arrive with M4+ models).
 - Browser autoplay policies will require host interaction before audio playback
   (to be designed for in M12/M13).
+- The automated test suite uses in-memory SQLite; Postgres-specific SQL should be
+  avoided in domain code or handled dialect-aware (see DECISIONS D22).
 
 ## 11. Important decisions
 
@@ -201,6 +211,8 @@ See `docs/DECISIONS.md` for the full, maintained list. Highlights:
 - MVP behavior is frozen in `docs/PRODUCT_SPEC.md` (M1): duplicates allowed,
   nickname rules, active-entry limit, deterministic round ordering, sessions not
   tied to a browser connection.
+- Async SQLAlchemy + asyncpg; self-contained SQLite test suite; dev PostgreSQL via
+  Docker Compose; stdlib JSON logging (M2, DECISIONS D21–D24).
 - No user-visible feature in M0 beyond a health check.
 
 ## 12. Commands for running / testing
@@ -208,19 +220,23 @@ See `docs/DECISIONS.md` for the full, maintained list. Highlights:
 See `docs/RUNBOOK.md`. Short version:
 
 ```bash
+# Database (local PostgreSQL via Docker Compose)
+docker compose up -d db
+
 # Backend
 cd backend
 uv sync
-uv run uvicorn app.main:app --reload     # starts API at http://localhost:8000
-uv run pytest                            # tests
-uv run pyright                           # static type check
+uv run alembic upgrade head                  # apply migrations
+uv run uvicorn app.main:app --reload         # http://localhost:8000
+uv run pytest                                # tests (SQLite, no Docker needed)
+uv run pyright                               # static type check
 
 # Frontend
 cd frontend
 npm install
-npm run dev                              # starts Vite dev server
-npm run build                            # production build
-npm run typecheck                        # tsc --noEmit
+npm run dev                                  # starts Vite dev server
+npm run build                                # production build
+npm run typecheck                            # tsc --noEmit
 ```
 
 ## 13. Things explicitly NOT to build (v1 non-goals)

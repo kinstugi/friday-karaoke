@@ -7,58 +7,106 @@ of every milestone. The persistent context lives in `PROJECT_BRAIN.md`.
 
 ## Current milestone
 
-**M1 — Product Specification + UX** — COMPLETE (verified).
+**M2 — Backend Skeleton + Database** — COMPLETE (verified).
 
 ## Current task
 
-None (milestone finished). Next milestone: **M2 — Backend Skeleton + Database**.
+None (milestone finished). Next milestone: **M3 — Host Authentication**.
 
-## Verification results (M1 acceptance criteria)
+## Verification results (M2 acceptance criteria, plan.md §M2)
 
-| Acceptance criterion (plan.md §M1)                          | Result |
-| ----------------------------------------------------------- | ------ |
-| User flows documented clearly enough to implement without guessing | Yes — `docs/PRODUCT_SPEC.md` §5 (host), §6 (participant), detailed step-by-step with screen inventory §7 |
-| Business rules documented clearly enough to implement without guessing | Yes — normative rules B1–B18 (§9) + 24 edge cases E1–E24 (§8) + playback/automation spec (§10) |
-| All 17 required edge cases from plan.md covered | Yes — every one appears in the catalog (E1–E17 map 1:1; E19–E21 add the plan.md §M18 concurrency scenarios; E18/E22–E24 add robustness cases consistent with §M18) |
+| Acceptance criterion | Result |
+| -------------------- | ------ |
+| Application starts | Verified — `uvicorn app.main:app` serves the API |
+| PostgreSQL connects | Verified — readiness endpoint 200 against dockerized Postgres; 503 when stopped |
+| Migrations run | Verified — `alembic upgrade head` applied `0001_initial` to real Postgres |
+| Health endpoint works | Verified — `/`, `/health`, `/health/ready` all correct (see API_CONTRACT) |
+| Automated test project runs | Verified — `uv run pytest`: 9 passed (SQLite, self-contained) |
+| API request/response contracts use Pydantic models | Yes — `app/schemas/health.py` (ServiceInfo, ReadinessResponse, ComponentStatus) |
+| Configuration uses Pydantic Settings | Yes — `app/core/config.py`, `KARAOKE_` prefix, cached singleton |
+| Static type checking configured and passes | Verified — `uv run pyright`: 0 errors, 0 warnings |
 
-Coverage map (plan.md §M1 edge cases -> spec): duplicate song E1, participant
-leaves E2, invalid URL E3, video unavailable E4, video unavailable after submission
-E5, host removes participant E6, host edits song E7, participant refreshes E8,
-participant loses internet E9, host loses internet E10, host closes browser E11,
-song ends E12, host skips E13, host manually advances E14, queue empty E15,
-round ends E16, no next-round answer E17.
+Extra verification performed:
 
-Checks run (no code changed in M1 — documentation only):
+- `GET /health/ready` returned HTTP 503 `{"detail":"database unavailable"}` while
+  Postgres was stopped (liveness endpoints unaffected).
+- OpenAPI schema lists `['/', '/health', '/health/ready']`; structured JSON logs
+  confirmed (uvicorn error/access lines emitted as single-line JSON).
+- Frontend unaffected: `npm run typecheck`, `npm run lint`, `npm run build` clean.
 
-- `uv run pytest` — 2 passed (unchanged).
-- `uv run pyright` — 0 errors, 0 warnings.
-- `npm run typecheck` — clean. `npm run lint` — clean.
-- Confirmed on `dev`, working tree contained only the intended doc edits.
-
-## Files changed (M1)
+## Files changed (M2)
 
 ```text
-docs/PRODUCT_SPEC.md    (new — frozen MVP behavioral contract)
-docs/DECISIONS.md       (updated — M1 decisions D14–D20)
-docs/PROJECT_BRAIN.md   (updated — related files, journeys pointer, milestone status)
-docs/DEV_BRAIN.md       (updated, this file)
+backend/app/main.py              (rewritten — app factory create_app)
+backend/app/core/                (new — config.py, logging.py, database.py)
+backend/app/models/              (new — base.py + __init__)
+backend/app/schemas/             (new — health.py + __init__)
+backend/app/api/                 (new — routes/health.py + __init__)
+backend/app/domain/              (new — placeholder package)
+backend/app/services/            (new — placeholder package)
+backend/app/repositories/        (new — placeholder package)
+backend/alembic/                 (new — async env.py, initial revision)
+backend/alembic.ini              (new)
+backend/.env.example             (new)
+backend/tests/                   (conftest.py new; test_health.py updated;
+                                  test_config.py, test_database.py new)
+backend/pyproject.toml           (updated — deps, asyncio_mode)
+backend/uv.lock                  (updated)
+compose.yaml                     (new — dev PostgreSQL)
+docs/DECISIONS.md                (updated — D21–D24)
+docs/ARCHITECTURE.md             (updated — §3 implemented state, §7 phases)
+docs/API_CONTRACT.md             (updated — §1 health incl. /health/ready)
+docs/RUNBOOK.md                  (updated — DB setup, M2 checklist)
+docs/PROJECT_BRAIN.md            (updated — milestones, commands, limitations)
+docs/DEV_BRAIN.md                (updated, this file)
 ```
 
-## Implementation notes (M1)
+## Implementation notes (M2)
 
-- M1 is a documentation milestone by design (plan.md §M1). No backend/frontend
-  code was touched; the existing scaffolds are unchanged.
-- The spec is deliberately concrete so later milestones (M2–M17) can implement
-  without guessing: concrete defaults (active-entry limit 2, cooldown 10 s,
-  countdown 20 s, nickname 1–20 chars unique per session) and deterministic rules
-  (round ordering, skip vs. advance).
-- Behavioral decisions were recorded in DECISIONS.md D14–D20 so the rationale is
-  preserved (no silent redesign in later milestones).
+- **Layering:** api/core/models/schemas are live; domain/services/repositories are
+  placeholder packages per the planned layout (ARCHITECTURE §3) and get real
+  content from M4 onward. No unnecessary abstractions were added.
+- **DB engine:** built once from settings (`app.core.database.build_engine`);
+  SQLite URLs get a static pool so tests share one in-memory database. Engines
+  connect lazily, so import never blocks on an unreachable database.
+- **Readiness:** `/health/ready` probes with `SELECT 1` through the real
+  `get_session` dependency and returns 503 on failure. Liveness (`/`, `/health`)
+  stays database-independent.
+- **Alembic:** async env reads the URL from `get_settings()` (not alembic.ini);
+  `target_metadata = Base.metadata` for autogenerate. Initial revision is empty —
+  no domain models exist yet.
+- **Tests:** `tests/conftest.py` sets `KARAOKE_ENVIRONMENT=test` and
+  `KARAOKE_DATABASE_URL=sqlite+aiosqlite://` before the app is imported, so the
+  whole suite (incl. `/health/ready`) runs against SQLite without Docker. Env vars
+  are hard-assigned (not `setdefault`) and config tests pin expected values
+  explicitly, so a developer's local `backend/.env` (RUNBOOK setup step) cannot
+  break the suite — verified both with and without `.env`.
+- **Pyright note:** pydantic-settings' generated `_env_file`/`_secrets_dir`
+  constructor params are unknown to pyright; tests construct `Settings()` directly
+  (environment variables are pinned in conftest, so behavior is deterministic).
 
-## Tests added (M1)
+## Post-review fixes (M2)
 
-- None (documentation milestone). The M1 acceptance criterion is document quality;
-  verified via the coverage map above and cross-doc consistency.
+Applied after the reviewer's `NEEDS_CHANGES` finding:
+
+- `tests/conftest.py` — hard-assigned test env vars (was `setdefault`) so shell/.env
+  leakage is impossible.
+- `tests/test_config.py::test_settings_defaults` — pins expected default values via
+  `monkeypatch.setenv` (env precedence beats dotenv); no longer breaks when a local
+  `backend/.env` exists.
+- `app/api/routes/health.py` — readiness now calls `check_database_connection`
+  helper instead of duplicating the probe.
+- `tests/test_database.py` — test renamed to assert the observable contract
+  (single usable session); dropped a flawed `is_active` closed-state assertion
+  (`is_active` is not a closed-state signal in SQLAlchemy).
+- `app/schemas/health.py` — status fields tightened to `Literal["ok"]`.
+
+## Tests added (M2)
+
+- `tests/test_health.py` — `/`, `/health`, `/health/ready` (3 tests).
+- `tests/test_config.py` — settings defaults, env override, env prefix (3 tests).
+- `tests/test_database.py` — readiness probe, session query, DI yield/close (3 tests).
+- **9 passed** total.
 
 ## Current blockers
 
@@ -66,14 +114,13 @@ docs/DEV_BRAIN.md       (updated, this file)
 
 ## Unresolved technical questions
 
-- Tracked in `docs/DECISIONS.md` (Open questions): host auth mechanism (M3),
-  YouTube metadata source (M6), realtime payload schemas (M10), Web Push choice
-  (M15). None block M2.
+- None for M2. Tracked in `docs/DECISIONS.md` (Open questions): host auth mechanism
+  (M3), YouTube metadata source (M6), realtime payload schemas (M10), Web Push (M15).
 - Starlette deprecation warning (`httpx` vs `httpx2` in `fastapi.testclient`) —
   non-blocking, tracked since M0.
 
 ## Next recommended task
 
-**M2 — Backend Skeleton + Database** — FastAPI + SQLAlchemy 2.x + PostgreSQL +
-Alembic + Pydantic Settings + structured logging + health endpoint + project layers
-(see `plan.md` §M2). The backend layout target is in `docs/ARCHITECTURE.md` §3.
+**M3 — Host Authentication** — host registration/login with email/password,
+password hashing, authentication tokens/cookies, logout, and protected host
+endpoints (see `plan.md` §M3 and `docs/PRODUCT_SPEC.md` §2/§5.1).

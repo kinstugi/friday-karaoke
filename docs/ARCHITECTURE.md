@@ -49,24 +49,39 @@ the intended target state for v1.
    RabbitMQ, Kubernetes, CQRS, or event sourcing unless a concrete later
    requirement demands them.
 
-## 3. Backend structure (target)
+## 3. Backend structure
 
-Planned layout (implemented from M2 onward; M0 contains only a minimal app):
+Layout (implemented at M2: packages exist; `domain/`, `services/`, and
+`repositories/` are placeholders filled from M4 onward):
 
 ```text
 backend/
     app/
-        api/          # HTTP + WebSocket endpoints/routers
-        core/         # config (Pydantic Settings), logging, security helpers
-        domain/       # domain models, enums, business rules, state machines
-        services/     # application use-cases / orchestration
-        repositories/ # persistence access (SQLAlchemy)
-        models/       # SQLAlchemy ORM models
-        schemas/      # Pydantic API schemas
+        api/          # HTTP + WebSocket endpoints/routers (health router at M2)
+        core/         # config (Pydantic Settings), structured logging, database
+        domain/       # domain models, enums, business rules, state machines (M4+)
+        services/     # application use-cases / orchestration (M4+)
+        repositories/ # persistence access (SQLAlchemy) (M4+)
+        models/       # SQLAlchemy ORM models (Base at M2; domain tables M4+)
+        schemas/      # Pydantic API schemas (health schemas at M2)
         main.py       # FastAPI app factory / entry point
-    tests/            # pytest suite
-    alembic/          # migrations
+    tests/            # pytest suite (self-contained: in-memory SQLite)
+    alembic/          # migrations (async env; initial empty revision at M2)
+    alembic.ini
 ```
+
+Implementation status at M2:
+
+- **Configuration:** Pydantic Settings (`app/core/config.py`), env prefix
+  `KARAOKE_`, `.env` file support, cached singleton via `get_settings()`.
+- **Database:** async SQLAlchemy engine + session factory + `get_session`
+  dependency (`app/core/database.py`); PostgreSQL via `asyncpg`, in-memory SQLite
+  for tests.
+- **Logging:** structured JSON to stdout, stdlib-based (`app/core/logging.py`).
+- **Endpoints:** `/` (identity), `/health` (liveness), `/health/ready` (readiness,
+  probes the database and returns 503 when it is unreachable).
+- **Migrations:** Alembic with an async env wired to application settings; the
+  initial revision anchors the chain (no tables until M4+ models exist).
 
 Rules:
 
@@ -135,9 +150,10 @@ get correct state from the API.
 
 ## 7. Milestone phases (architecture growth)
 
-- **M0** — repository + documentation (this milestone).
-- **M2** — backend skeleton: FastAPI, SQLAlchemy 2.x, PostgreSQL, Alembic, Pydantic
-  Settings, structured logging, health endpoint, project layers.
+- **M0** — repository + documentation (complete).
+- **M2** — backend skeleton (complete): FastAPI app factory, async SQLAlchemy 2.x +
+  asyncpg, PostgreSQL, Alembic, Pydantic Settings, structured JSON logging,
+  readiness health endpoint, project layers.
 - **M3–M9** — vertical slice: auth, sessions, join flow, YouTube metadata, queue,
   participant UI, host dashboard.
 - **M10–M16** — realtime + playback + rounds + notifications.

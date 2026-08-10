@@ -199,6 +199,56 @@ These freeze MVP product behavior. They were captured in `docs/PRODUCT_SPEC.md`.
 
 ---
 
+## M2 backend-skeleton decisions
+
+## D21. Async SQLAlchemy + asyncpg
+
+- **Status:** Accepted
+- **Decision:** The database layer uses SQLAlchemy 2.x with the asyncio extension
+  and `asyncpg` as the PostgreSQL driver. Sessions are exposed to endpoints through
+  a single FastAPI dependency (`app.core.database.get_session`).
+- **Rationale:** FastAPI is async-first; blocking the event loop with sync DB calls
+  would degrade the realtime features coming in M10+. Async SQLAlchemy is the
+  standard, well-supported FastAPI pattern.
+- **Rejected:** Sync SQLAlchemy + psycopg2 (simpler but blocks the loop); raw
+  asyncpg without an ORM (loses Alembic/metadata tooling).
+
+## D22. Self-contained test database
+
+- **Status:** Accepted
+- **Decision:** The automated test suite runs against in-memory SQLite
+  (`sqlite+aiosqlite://` with a static pool), configured via the same
+  `KARAOKE_DATABASE_URL` settings path. No PostgreSQL is required to run `pytest`.
+- **Rationale:** Fresh clones and CI should not require Docker/Postgres to verify
+  the skeleton. The engine is built from settings, so the same code path is
+  exercised; PostgreSQL is verified manually via the dev compose file and Alembic.
+- **Caveat:** SQLite-specific quirks must be watched in M4+ when real models land
+  (Postgres-specific types such as UUID/JSONB may need dialect handling).
+
+## D23. Development PostgreSQL via Docker Compose
+
+- **Status:** Accepted
+- **Decision:** A root `compose.yaml` provides a Postgres 17 service for local
+  development (`docker compose up -d db`). Full production deployment compose
+  (frontend + backend + db + reverse proxy) is M20.
+- **Rationale:** Local Postgres parity for migrations and manual testing without
+  installing a server on the host machine.
+- **Rejected:** Testcontainers in the default suite (adds Docker coupling to every
+  test run); requiring a locally installed Postgres.
+
+## D24. Structured logging with stdlib JSON formatter
+
+- **Status:** Accepted
+- **Decision:** Logging is configured at startup via `app.core.logging` using the
+  standard library with a JSON formatter (single-line records to stdout), covering
+  the root and uvicorn loggers.
+- **Rationale:** Machine-parseable logs for the M20 deployment without adding a
+  logging dependency (structlog etc.).
+- **Rejected:** structlog (extra dependency, no M2 need); plain text logs
+  (unstructured).
+
+---
+
 ## Open questions (tracked)
 
 - Authentication mechanism for hosts (email/password vs. school SSO) — M3.
