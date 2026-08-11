@@ -121,7 +121,8 @@ Rules:
 
 ## 4. Frontend structure
 
-Implemented at M8 (participant queue UI); the host dashboard lands at M9:
+Implement at M9/M9.1 (design system via the `frontend-ui` skill; all screens
+use token-driven styles from `src/index.css`); the host dashboard lands at M9:
 
 ```text
 frontend/
@@ -139,12 +140,17 @@ frontend/
     public/        # manifest, icons, service worker
 ```
 
-Frontend rules (all in effect at M8/M9):
+Frontend rules (all in effect at M8/M9/M9.1):
 
 - Never store authoritative state; treat API responses as the source of truth.
   The only client-side persistence is the participant identity (token/session)
   and the host identity (token/email) in localStorage (D38/D39/E8); queue state
   is never stored or merged client-side.
+- The `frontend-ui` skill (`.opencode/skills/frontend-ui/SKILL.md`) is the
+  frontend quality bar: design tokens (CSS variables in `src/index.css`), the
+  two-surface layout rules (mobile-first participant vs projector/TV host),
+  component patterns, and accessibility. The coder loads it for frontend work;
+  the reviewer loads it for frontend reviews (M9.1).
 - Reuse API types/schemas generated from backend Pydantic contracts where
   possible — `src/api/types.ts` mirrors the backend schemas by hand and the API
   client (`src/api/client.ts`) is a typed fetch wrapper.
@@ -214,6 +220,9 @@ get correct state from the API.
 - **M9** — host dashboard (complete, frontend): host auth + home (session list,
   create) + dashboard (now/next cards, full queue, QR/join code, start/remove/
   edit/end actions; skip/finish/pause/resume rendered disabled until M11).
+- **M9.1** — frontend UI polish (complete, frontend): `frontend-ui` skill
+  (design system, two-surface rules, components, accessibility) + all screens
+  refactored onto token-driven styles.
 - **M10–M16** — realtime + playback + rounds + notifications.
 - **M17–M19** — security, testing, PWA/mobile UX.
 - **M20–M22** — deployment, pilot, fixes.

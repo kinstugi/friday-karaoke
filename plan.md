@@ -140,6 +140,28 @@ Pydantic models are part of the architecture, not optional convenience classes.
 Redis is NOT required for the first deployment. Add it only if a concrete
 requirement appears.
 
+### Frontend UI quality bar
+
+The project ships a real user-facing UI (participant phones + a projector host
+dashboard), so visual/UX quality is part of every frontend milestone's
+Definition of Done. Every frontend milestone must follow the **`frontend-ui`**
+skill in `.opencode/skills/frontend-ui/SKILL.md`:
+
+- **Design tokens** — colors, spacing, radius, and type scale are CSS variables
+  in `src/index.css`; screens never hard-code values.
+- **Two surfaces** — participant screens are mobile-first (single column, ≥ 44px
+  targets); the host dashboard is projector/TV-ready (large text, high contrast,
+  now/next above the fold).
+- **Component patterns** — buttons (primary/ghost/danger), cards, badges, labeled
+  inputs with `:focus-visible`, list rows, and loading/empty/error states for
+  every fetch.
+- **Accessibility** — WCAG AA contrast, visible focus rings, semantic HTML, and
+  no `<a>` wrapping a `<button>`.
+- **Checks** — `npm run typecheck`, `npm run lint`, and `npm run build` pass.
+
+The coder agent loads this skill when touching frontend UI; the reviewer loads
+it when reviewing frontend diffs.
+
 ---
 
 # 1.1 Engineering Portfolio Intent
@@ -249,6 +271,7 @@ M6  YouTube URL submission + metadata
 M7  Queue management
 M8  Participant queue UI
 M9  Host dashboard
+M9.1 Frontend UI polish (design system + quality bar)
 M10 Realtime updates with SignalR
 M11 Playback state machine
 M12 YouTube host player
@@ -698,6 +721,39 @@ End session
 ```
 
 The host dashboard must be usable while connected to a projector/TV.
+
+---
+
+# M9.1 — Frontend UI polish
+
+## Goal
+
+Bring the participant and host screens up to the project's frontend UI quality
+bar (the `frontend-ui` skill in `.opencode/skills/frontend-ui/SKILL.md`), which
+every frontend milestone must follow from now on.
+
+## Tasks
+
+- Codify the design tokens (colors, spacing, radius, type scale) as CSS
+  variables in `frontend/src/index.css`; refactor `App.css` to use them.
+- Rework the host screens (login, home, dashboard) and the participant screens
+  (join, submit, queue) to the component patterns in the skill.
+- Fix invalid HTML: no `<a>` element may wrap a `<button>` (host home currently
+  does).
+- Add real labels/focus states to inputs; ensure every async region shows
+  loading, empty, and error states.
+- Keep the dark theme and the existing architecture; no scope creep, no new
+  dependencies, no backend changes.
+
+## Acceptance criteria
+
+- Design tokens are defined and used (no hard-coded colors/spacing in screens).
+- Host dashboard is projector/TV-ready: large text, high contrast, now/next
+  above the fold, actions grouped and disabled states explained.
+- Participant screens are mobile-first with ≥ 44px touch targets.
+- No `<a>` wrapping `<button>`; `:focus-visible` visible; inputs labeled.
+- `npm run typecheck`, `npm run lint`, `npm run build` pass.
+- No backend changes; existing backend suite still passes.
 
 ---
 
@@ -1402,6 +1458,8 @@ M7
 M8
  ↓
 M9
+ ↓
+M9.1
  ↓
 M10
  ↓

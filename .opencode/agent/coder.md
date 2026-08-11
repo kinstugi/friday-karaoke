@@ -33,6 +33,13 @@ Before ANY modification, in this order:
 - Do not over-validate YouTube content. Validate the URL format and extract
   metadata, warn on unusually long videos, but never auto-reject for length.
 
+## Frontend UI
+
+- When implementing or modifying frontend UI (screens, components, CSS), load
+  the `frontend-ui` skill first and follow it: design tokens, the two-surface
+  layout rules (mobile-first participant vs projector/TV host), component
+  patterns, accessibility, and the frontend Definition of Done.
+
 ## Mandatory typing rules (Python)
 
 - Pydantic v2 models are required at every API/application boundary.

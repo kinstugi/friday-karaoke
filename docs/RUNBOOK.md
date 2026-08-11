@@ -166,6 +166,21 @@ backend. Skip/finish/pause/resume are visible but disabled until the M11 playbac
 state machine lands. Health, host auth, sessions, join, and preview endpoints
 from M2-M6 are unchanged.
 
+## UI polish verification (M9.1)
+
+The frontend UI quality bar is the `frontend-ui` skill
+(`.opencode/skills/frontend-ui/SKILL.md`); agents load it for frontend work.
+Sanity checks:
+
+```bash
+cd frontend
+npm run typecheck && npm run lint && npm run build
+# Manual: open http://localhost:5173/host (login), create a session (home),
+# open the dashboard -> labeled inputs, focus rings, QR + join code, now/next
+# cards, and the queue with per-entry Edit/Remove. Participant screens:
+# http://localhost:5173/join/<code> -> nickname -> submit -> queue.
+```
+
 ## Branch / commit workflow
 
 - Development happens on `dev`. Never commit directly to `master`.

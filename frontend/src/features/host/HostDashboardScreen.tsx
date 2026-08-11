@@ -234,10 +234,13 @@ export default function HostDashboardScreen() {
               </div>
               <div className="card">
                 <p className="label">Playback</p>
-                <p className="muted">
-                  Automatic playback starts with a future milestone; the host
-                  keeps manual control.
-                </p>
+                {nowSinging ? (
+                  <p>Playing through the host device.</p>
+                ) : upNext ? (
+                  <p>Queue ready — playback automation arrives in a later milestone.</p>
+                ) : (
+                  <p className="muted">No songs queued yet.</p>
+                )}
               </div>
             </div>
 
@@ -292,6 +295,7 @@ export default function HostDashboardScreen() {
                               value={editUrl}
                               onChange={(e) => setEditUrl(e.target.value)}
                               placeholder="New YouTube URL"
+                              aria-label="New YouTube URL"
                               required
                             />
                             <div className="row">

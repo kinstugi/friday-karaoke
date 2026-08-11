@@ -165,11 +165,20 @@ limit, sessions not tied to a browser) are in `docs/PRODUCT_SPEC.md` §8–§9 a
 
 ## 8. Current milestone
 
-**M10 — Realtime updates** (next; backend + frontend). M9 is complete; see
+**M10 — Realtime updates** (next; backend + frontend). M9.1 is complete; see
 `docs/DEV_BRAIN.md` for live status.
 
 ## 9. Completed milestones
 
+- **M9.1 — Frontend UI polish** (complete, frontend + config): codified the
+  project's frontend UI quality bar as the `frontend-ui` skill
+  (`.opencode/skills/frontend-ui/SKILL.md`), wired into the coder and reviewer
+  agents, added a "Frontend UI quality bar" section and the M9.1 milestone to
+  `plan.md`, and refactored all screens onto the new design system: CSS design
+  tokens (colors/spacing/radius/type scale) in `src/index.css`, token-driven
+  component styles in `App.css`, labeled inputs with `:focus-visible`, per-fetch
+  loading/empty/error states, and the invalid `<a>`-wrapping-`<button>` nesting
+  on the host home removed. No backend changes; suite still 163 passing.
 - **M9 — Host Dashboard** (complete, frontend + one backend endpoint): the host's
   projector/TV control screen — `HostAuthScreen` (login/register, M3),
   `HostHomeScreen` (create session + list own sessions), and
@@ -308,6 +317,9 @@ See `docs/DECISIONS.md` for the full, maintained list. Highlights:
   list endpoint for the dashboard home / E11 re-sync, and the dashboard's action
   bar wired only to existing M4/M7 endpoints — playback actions stay disabled
   until M11 (D39, D40).
+- Frontend UI (M9.1): the `frontend-ui` skill codifies the design system
+  (tokens, two-surface layout, components, accessibility) and is the quality bar
+  for every frontend milestone; all screens now use the token-driven styles.
 - No user-visible feature in M0 beyond a health check.
 
 ## 12. Commands for running / testing

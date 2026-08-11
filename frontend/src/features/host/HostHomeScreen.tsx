@@ -7,7 +7,7 @@ import { Link, Navigate, useNavigate } from 'react-router-dom'
 
 import { createSession, listSessions, logoutHost } from '../../api/host'
 import type { Session } from '../../api/types'
-import { loadHostIdentity, clearHostIdentity } from '../../lib/hostToken'
+import { clearHostIdentity, loadHostIdentity } from '../../lib/hostToken'
 import { statusLabel } from '../../lib/session'
 
 export default function HostHomeScreen() {
@@ -72,13 +72,17 @@ export default function HostHomeScreen() {
 
       <form className="card stack" onSubmit={handleCreate}>
         <h2>New session</h2>
-        <input
-          type="text"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Name (defaults to Friday Karaoke - today)"
-          maxLength={100}
-        />
+        <div className="field">
+          <label htmlFor="session-name">Session name</label>
+          <input
+            id="session-name"
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Defaults to Friday Karaoke - today"
+            maxLength={100}
+          />
+        </div>
         <button type="submit" disabled={creating}>
           {creating ? 'Creating…' : 'Create session'}
         </button>
@@ -92,7 +96,7 @@ export default function HostHomeScreen() {
         ) : sessions.length === 0 ? (
           <p className="muted">No sessions yet — create your first one above.</p>
         ) : (
-          <ol className="queue-list">
+          <ol className="queue-list home-list">
             {sessions.map((session) => (
               <li key={session.id}>
                 <div className="entry-main">
@@ -101,8 +105,8 @@ export default function HostHomeScreen() {
                     Code {session.join_code} &middot; {statusLabel(session.status)}
                   </span>
                 </div>
-                <Link to={`/host/sessions/${session.id}`}>
-                  <button>Open</button>
+                <Link className="home-open button-link" to={`/host/sessions/${session.id}`}>
+                  Open
                 </Link>
               </li>
             ))}

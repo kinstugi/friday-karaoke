@@ -65,13 +65,17 @@ export default function SubmitSongScreen() {
       <h1>Add a song</h1>
 
       <form className="stack" onSubmit={handlePreview}>
-        <input
-          type="url"
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          placeholder="Paste a YouTube link"
-          required
-        />
+        <div className="field">
+          <label htmlFor="youtube-url">YouTube link</label>
+          <input
+            id="youtube-url"
+            type="url"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="Paste a YouTube link"
+            required
+          />
+        </div>
         <button type="submit" disabled={loading || url.trim() === ''}>
           {loading && !preview ? 'Checking…' : 'Preview'}
         </button>

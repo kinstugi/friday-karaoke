@@ -548,6 +548,31 @@ These freeze MVP product behavior. They were captured in `docs/PRODUCT_SPEC.md`.
 
 ---
 
+## M9.1 frontend-UI decisions
+
+## D41. Frontend UI quality bar is a project skill (`frontend-ui`)
+
+- **Status:** Accepted
+- **Decision:** The frontend's design system and quality rules live in a
+  project skill at `.opencode/skills/frontend-ui/SKILL.md`: design tokens
+  (colors/spacing/radius/type scale as CSS variables in `src/index.css`), the
+  two-surface layout rules (mobile-first participant vs projector/TV host),
+  component patterns, accessibility, and a per-change Definition of Done. The
+  coder agent loads the skill for frontend work; the reviewer loads it for
+  frontend reviews; `plan.md` gained a "Frontend UI quality bar" section and an
+  M9.1 milestone. All screens were refactored onto the token-driven styles
+  (M9.1).
+- **Rationale:** The frontend is a real user-facing product (student phones +
+  a projector host screen), so visual/UX quality is part of every frontend
+  milestone's Definition of Done. A skill is loadable by any agent at the right
+  moment (unlike a wall of prose in `plan.md`, which agents skim), and keeping
+  it out of `AGENTS.md` avoids bloating every prompt.
+- **Rejected:** Putting the design system only in `AGENTS.md` (always loaded,
+  noisy for backend-only work); relying on ad-hoc "make it look nice" requests
+  per milestone (inconsistent, untestable).
+
+---
+
 ## Open questions (tracked)
 
 - ~~Authentication mechanism for hosts (email/password vs. school SSO)~~ — **M3

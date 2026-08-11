@@ -37,7 +37,12 @@ milestone's acceptance criteria.
    - Lint: `uv run ruff` if configured
    - Frontend (when it exists): `npm test` / `npm run build` in `frontend/`
 6. Verify the milestone's acceptance criteria explicitly, item by item.
-7. Check for security/abuse issues relevant to a public QR-code app: request
+7. When reviewing frontend diffs, load the `frontend-ui` skill and check the UI
+   against its design system: tokens used (no hard-coded colors/spacing), surface
+   rules (participant mobile-first, host projector-ready), loading/empty/error
+   states for every fetch, ≥44px targets, `:focus-visible`, no `<a>` wrapping
+   `<button>`, and the frontend checks (`npm run typecheck` / `lint` / `build`).
+8. Check for security/abuse issues relevant to a public QR-code app: request
    validation, authorization/ownership checks, rate limiting, input length
    limits.
 

@@ -7,99 +7,90 @@ of every milestone. The persistent context lives in `PROJECT_BRAIN.md`.
 
 ## Current milestone
 
-**M9 — Host Dashboard** — COMPLETE (verified). The host's single control screen
-for the projector.
+**M9.1 — Frontend UI polish** — COMPLETE (verified). Codified the frontend UI
+quality bar and refactored every screen onto the design system.
 
 ## Current task
 
 None (milestone finished). Next milestone: **M10 — Realtime updates**
 (FastAPI WebSockets; queue/participant/host push with resync).
 
-## M9 scope (plan.md §M9)
+## M9.1 scope (plan.md §M9.1)
 
-- Host auth screens (login/register, M3) and host identity persistence.
-- Host home: create session + list own sessions (new `GET /api/v1/sessions`).
-- Host dashboard for one session: current singer, current song, playback status,
-  full queue (participant names, song titles, durations), QR + join code.
-- Host actions backed by existing M4/M7 endpoints: start session, remove entry,
-  edit entry URL, end session.
-- Skip/finish/pause/resume rendered disabled (D40) — they need the M11 playback
-  state machine, which is not part of M9.
+- Create the `frontend-ui` skill (`.opencode/skills/frontend-ui/SKILL.md`) and
+  wire it into the coder + reviewer agents.
+- Add a "Frontend UI quality bar" section and the M9.1 milestone to `plan.md`.
+- Refactor all screens (host login/home/dashboard + participant join/submit/
+  queue) onto the design system: tokens, component patterns, accessibility.
+- Fix invalid HTML (`<a>` wrapping `<button>` on the host home).
+- No backend changes; no new dependencies.
 
-## Verification results (M9 acceptance criteria, plan.md §M9)
+## Verification results (M9.1 acceptance criteria, plan.md §M9.1)
 
 | Acceptance criterion | Result |
 | -------------------- | ------ |
-| Host dashboard usable on a projector/TV | Verified — projector/TV CSS (large text, high contrast, minimal scrolling for current/next; two-column layout collapsing under 60rem) + `npm run typecheck` (0 errors), `npm run build` (ok), `npm run lint` (0 issues) |
-| One screen to control karaoke | Verified via live smoke through the Vite dev proxy against PostgreSQL: `/host/login`, `/host`, `/host/sessions/:id`, `/join*` all serve 200; register → login → create session → list sessions → QR (200 `image/svg+xml`) → public snapshot → start (ACTIVE) → end (ENDED) all propagate through `localhost:5173/api`. Host remove/edit use the existing M7 endpoints (404 on missing entries; 503 only when the YouTube API key is unset — pre-existing M7 behavior). |
+| Design tokens defined and used (no hard-coded colors/spacing) | Verified — `:root` tokens in `src/index.css`; `App.css` rewritten to reference them only |
+| Host dashboard projector/TV-ready | Verified — large text (2rem heading, 2.4rem join code), high contrast, now/next above the fold, actions grouped, disabled actions dimmed with tooltips |
+| Participant screens mobile-first with ≥ 44px targets | Verified — single-column `.screen`, buttons/inputs min-height 48px |
+| No `<a>` wrapping `<button>`; `:focus-visible`; inputs labeled | Verified — host home now uses a `.button-link` anchor; `input:focus-visible` ring; real `<label>`s added to email/password/nickname/URL/session-name + `aria-label` on the inline edit input |
+| typecheck / lint / build pass | Verified — `npm run typecheck` (0 errors), `npm run lint` (0 issues), `npm run build` (ok) |
+| No backend changes; backend suite passes | Verified — backend untouched; `uv run pytest` = 163 passed, `uv run pyright` = 0 errors |
 
 Extra verification performed:
 
-- Routing: `/host/login` (auth), `/host` (home), `/host/sessions/:sessionId`
-  (dashboard), unknown -> redirect. Participant routes unchanged.
-- Host identity persistence (D39): login stores token/email/hostId in
-  localStorage; refresh resumes the home screen (E11); logout revokes + clears.
-- Dashboard renders only backend state: now/next derived from entry `status`
-  values (SINGING/NEXT/WAITING — M11 assigns real statuses), session status
-  from the authoritative session + snapshot.
-- Backend suite: **163 passed** (+5 for the new list endpoint), pyright 0/0.
+- Live smoke through the Vite dev proxy against PostgreSQL: register → login →
+  create session → list → QR (SVG) → snapshot → start (ACTIVE) → end (ENDED)
+  all propagate through `localhost:5173/api`; all SPA routes 200; labels
+  present in the built bundle.
+- Agent wiring: coder.md and reviewer.md both instruct loading `frontend-ui`
+  for frontend work/reviews; plan.md gains the quality-bar section + M9.1.
 
-## Files changed (M9)
+## Files changed (M9.1)
 
 ```text
-backend/app/services/session.py              (+ SessionService.list_for_host, M9)
-backend/app/api/routes/sessions.py           (+ GET /api/v1/sessions list endpoint)
-backend/tests/test_sessions.py               (+ 5 tests: list endpoint)
-frontend/src/api/types.ts                    (+ HostProfile, HostLoginResult, Session)
-frontend/src/api/client.ts                   (+ apiRequestText for SVG QR)
-frontend/src/api/host.ts                     (new — host auth + session APIs + QR)
-frontend/src/api/entries.ts                  (+ removeEntry, editEntryVideo)
-frontend/src/lib/hostToken.ts                (new — host identity in localStorage, D39)
-frontend/src/lib/session.ts                  (new — shared statusLabel helper)
-frontend/src/features/host/HostAuthScreen.tsx (new — login/register)
-frontend/src/features/host/HostHomeScreen.tsx (new — create + list sessions)
-frontend/src/features/host/HostDashboardScreen.tsx (new — the dashboard)
-frontend/src/features/queue/QueueScreen.tsx  (use shared statusLabel)
-frontend/src/App.tsx                         (+ /host routes, host link on landing)
-frontend/src/App.css                         (+ host dashboard projector/TV styles)
-docs/DECISIONS.md                            (D39 host identity + session list; D40 playback actions disabled)
-docs/API_CONTRACT.md                         (GET /api/v1/sessions documented)
-docs/ARCHITECTURE.md                         (frontend structure, backend API, rules)
-docs/PROJECT_BRAIN.md                        (milestones, limitations, decisions)
-docs/DEV_BRAIN.md                            (updated, this file)
-docs/RUNBOOK.md                              (M9 checklist)
+.opencode/skills/frontend-ui/SKILL.md      (new — the frontend UI skill)
+.opencode/agent/coder.md                   (+ load frontend-ui for UI work)
+.opencode/agent/reviewer.md                (+ load frontend-ui for UI reviews)
+plan.md                                    (+ UI quality bar section, M9.1 milestone,
+                                            milestone overview + dev order)
+frontend/src/index.css                     (design tokens as CSS variables)
+frontend/src/App.css                       (token-driven component styles)
+frontend/src/features/host/HostAuthScreen.tsx (labels, brand header, removed
+                                            "Clear saved login" dev control)
+frontend/src/features/host/HostHomeScreen.tsx (label, .button-link instead of
+                                            <a><button>, styled list)
+frontend/src/features/host/HostDashboardScreen.tsx (aria-label on edit input,
+                                            clearer playback status)
+frontend/src/features/join/JoinScreen.tsx  (nickname label)
+frontend/src/features/submit/SubmitSongScreen.tsx (YouTube link label)
+docs/PROJECT_BRAIN.md                      (M9.1 milestone, decisions, structure)
+docs/ARCHITECTURE.md                       (frontend rules, milestone list)
+docs/DEV_BRAIN.md                          (updated, this file)
+docs/RUNBOOK.md                            (M9.1 checklist)
 ```
 
-## Implementation notes (M9)
+## Implementation notes (M9.1)
 
-- **Backend stays authoritative (D2):** the dashboard renders the session + queue
-  snapshot exactly as the backend returns them; the only client persistence is
-  the host identity in localStorage (D39). Positions, statuses, and session state
-  all come from the API.
-- **One small backend addition:** `GET /api/v1/sessions` (owning host, newest
-  first) — required for the dashboard home and E11 re-sync. Naming follows D30
-  (`list_sessions`, never like a dependency).
-- **QR display:** `apiRequestText` fetches the SVG QR (D32) with the host bearer
-  token and renders it as a data URL — the `/qr` endpoint requires host auth, so
-  a plain `<img src>` could not be used.
-- **Playback actions disabled (D40):** skip/finish/pause/resume are rendered with
-  a "Arrives with playback (M11)" tooltip and call no endpoint; start/remove/
-  edit/end are fully wired.
-- **Polling (D38):** the dashboard polls the public snapshot every 5 s (5 s is a
-  placeholder for the M10 WebSocket channel). The session (host) fetch + QR fetch
-  happen once on load.
-- **Edit flow (E7):** inline URL editor per entry; on save it calls the M7
-  `PATCH /entries/{id}/video`; a rejected replacement shows the backend error and
-  keeps the old URL (the backend never replaced it).
-- **No test framework added:** the plan's testing choice is backend pytest; the
-  frontend quality gates remain `npm run typecheck` / `build` / `lint` plus the
-  e2e smoke above.
+- **Skill-first:** the `frontend-ui` skill is the single source of truth for
+  frontend quality. It defines design tokens (colors, spacing, radius, type
+  scale), the two-surface layout rules (mobile-first participant vs
+  projector/TV host), component patterns (buttons/cards/badges/inputs/rows/
+  states), accessibility (AA contrast, focus-visible, labels, semantic HTML),
+  and a per-change Definition of Done.
+- **Tokens live in `index.css`:** `:root` variables only; `App.css` consumes
+  them. No screen hard-codes a color or spacing value anymore.
+- **a11y fixes:** all text inputs now have real `<label>`s or `aria-label`;
+  focus is visible on inputs and buttons via `:focus-visible`; the invalid
+  `<a>`-wrapping-`<button>` nesting on the host home was replaced by a
+  `.button-link` anchor styled like a button.
+- **No scope creep:** no new dependencies, no state management, no backend
+  edits, no design overhaul — the existing dark theme was formalized, not
+  replaced.
 
-## Tests added (M9)
+## Tests added (M9.1)
 
-- Backend: 5 tests for `GET /api/v1/sessions` (auth required, empty list, only
-  own sessions, `(created_at, id)` desc ordering, includes status/join_code).
-  Frontend: none (see above). Backend suite total: **163 passed**.
+- None (frontend + config/docs only; no behavior changed). Backend suite
+  unchanged: **163 passed**.
 
 ## Current blockers
 
@@ -120,3 +111,4 @@ docs/RUNBOOK.md                              (M9 checklist)
 domain events (QueueUpdated, SingerStarted, …, see plan.md §M10) to participant
 and host streams; clients resync from the REST API after reconnect (D5). Until
 then both the participant queue screen and the host dashboard poll every 5 s.
+

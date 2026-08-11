@@ -104,15 +104,19 @@ export default function JoinScreen() {
       <h1>{session.name}</h1>
       <p className="muted">Enter your nickname to join the queue.</p>
       <form className="stack" onSubmit={handleJoin}>
-        <input
-          type="text"
-          value={nickname}
-          onChange={(e) => setNickname(e.target.value)}
-          placeholder="Nickname"
-          maxLength={20}
-          required
-          autoFocus
-        />
+        <div className="field">
+          <label htmlFor="nickname">Nickname</label>
+          <input
+            id="nickname"
+            type="text"
+            value={nickname}
+            onChange={(e) => setNickname(e.target.value)}
+            placeholder="How you want to be called"
+            maxLength={20}
+            required
+            autoFocus
+          />
+        </div>
         <button type="submit" disabled={joining || nickname.trim() === ''}>
           {joining ? 'Joining…' : 'Join'}
         </button>
