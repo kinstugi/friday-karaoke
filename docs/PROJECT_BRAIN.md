@@ -165,11 +165,18 @@ limit, sessions not tied to a browser) are in `docs/PRODUCT_SPEC.md` §8–§9 a
 
 ## 8. Current milestone
 
-**M8 — Participant Queue UI** (next, first frontend milestone). M7 is complete;
-see `docs/DEV_BRAIN.md` for live status.
+**M9 — Host Dashboard** (next, frontend). M8 is complete; see
+`docs/DEV_BRAIN.md` for live status.
 
 ## 9. Completed milestones
 
+- **M8 — Participant Queue UI** (complete, first frontend milestone): mobile-first
+  participant screens — join by nickname (`/join/:code`), song submit with
+  preview→confirm (`/join/:code/submit`), and a polled queue screen
+  (`/join/:code/queue`) showing session status, now/up-next cards (from backend
+  statuses), positions, and cancel of own WAITING entries. Typed API client
+  (`src/api/`), participant identity in localStorage (D38, E8), Vite `/api` dev
+  proxy, `react-router-dom`. Frontend never owns queue state (D2).
 - **M7 — Queue Management** (complete): the authoritative queue engine —
   `QueueEntry` + `YouTubeVideo` + `Round` tables (migration `0005_queue`; round 1
   created with the session, D35), submit (`POST /sessions/{id}/entries`, with the
@@ -227,9 +234,11 @@ see `docs/DEV_BRAIN.md` for live status.
 
 ## 10. Known limitations
 
-- No playback yet (M11/M12); queue entries stay WAITING — NEXT/SINGING statuses
-  exist but are not yet assigned. Rounds are created but the round lifecycle
-  (enrollment, next round) lands in M16.
+- No host dashboard or playback yet (M9/M11/M12); queue entries stay WAITING —
+  NEXT/SINGING statuses exist but are not yet assigned. Rounds are created but
+  the round lifecycle (enrollment, next round) lands in M16.
+- Participant UI polls the snapshot (M8); realtime WebSocket delivery lands in
+  M10.
 - Only the Host/HostAuthToken/Session/Participant/YouTubeVideo/Round/QueueEntry
   tables exist (migration `0005`). PAUSED and ROUND_COMPLETE session states are
   defined but not reachable yet (M14/M16).
@@ -281,6 +290,8 @@ See `docs/DECISIONS.md` for the full, maintained list. Highlights:
   round-scoped (D35); ordering is microsecond `created_at` + `id` tie-break (D36);
   YouTubeVideo rows are shared per video id and DELETE /entries/{id} is dual-actor
   (participant cancel vs host remove) (D37).
+- Participant UI (M8): the frontend is a thin renderer — typed API client, identity
+  in localStorage, snapshot polling until M10 websockets (D38).
 - No user-visible feature in M0 beyond a health check.
 
 ## 12. Commands for running / testing

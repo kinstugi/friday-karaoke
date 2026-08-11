@@ -119,29 +119,39 @@ Rules:
 - `UUID`, `datetime`, `timedelta` instead of strings for typed values.
 - Explicit type hints everywhere; static type check (pyright/mypy) must pass.
 
-## 4. Frontend structure (target)
+## 4. Frontend structure
+
+Implemented at M8 (participant queue UI); the host dashboard lands at M9:
 
 ```text
 frontend/
     src/
-        api/       # typed API client
-        ws/        # typed WebSocket client
+        api/       # typed API client (client.ts, types.ts, session.ts, entries.ts)
+        ws/        # typed WebSocket client (M10)
         features/
-            join/       # QR join flow (nickname, song submission)
-            queue/      # participant queue view
-            host/       # host dashboard + playback
+            join/       # QR join flow (JoinScreen)
+            submit/     # song submission (SubmitSongScreen)
+            queue/      # participant queue view (QueueScreen)
+            host/       # host dashboard + playback (M9)
         app/       # routing, providers
         components/
-        lib/       # shared utilities, PWA helpers
+        lib/       # shared utilities (token persistence, formatting)
     public/        # manifest, icons, service worker
 ```
 
-Frontend rules:
+Frontend rules (all in effect at M8):
 
 - Never store authoritative state; treat API responses as the source of truth.
-- Reuse API types/schemas generated from backend Pydantic contracts where possible.
-- Mobile-first participant UI; host dashboard designed for a projector/TV.
+  The only client-side persistence is the participant identity (token/session) in
+  localStorage (D38/E8); queue state is never stored or merged client-side.
+- Reuse API types/schemas generated from backend Pydantic contracts where
+  possible — `src/api/types.ts` mirrors the backend schemas by hand and the API
+  client (`src/api/client.ts`) is a typed fetch wrapper.
+- Mobile-first participant UI (large touch targets ≥ 44px); host dashboard is
+  designed for a projector/TV (M9).
 - Standard PWA (manifest + service worker) planned for M19.
+- Realtime is a delivery mechanism only (D5); until the WebSocket channel lands
+  in M10 the queue screen polls the authoritative snapshot every 5 s (D38).
 
 ## 5. Data flow (target state)
 
@@ -196,7 +206,9 @@ get correct state from the API.
 - **M7** — queue management (complete): authoritative queue engine
   (`QueueEntry`/`YouTubeVideo`/`Round` tables), submit + snapshot with computed
   positions, participant cancel, host remove/edit.
-- **M8–M9** — participant queue UI, host dashboard (frontend).
+- **M8** — participant queue UI (complete, frontend): join/submit/queue screens,
+  typed API client, localStorage identity, snapshot polling.
+- **M9** — host dashboard (frontend, next).
 - **M10–M16** — realtime + playback + rounds + notifications.
 - **M17–M19** — security, testing, PWA/mobile UX.
 - **M20–M22** — deployment, pilot, fixes.

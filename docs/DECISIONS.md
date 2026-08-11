@@ -487,6 +487,27 @@ These freeze MVP product behavior. They were captured in `docs/PRODUCT_SPEC.md`.
 
 ---
 
+## M8 participant-UI decisions
+
+## D38. Participant identity lives in localStorage; snapshots are polled until M10
+
+- **Status:** Accepted
+- **Decision:** (1) The participant's identity (opaque token, session id/name,
+  join code, nickname) is persisted in `localStorage` under one key; refreshing
+  or revisiting `/join/{code}` resumes the queue without re-joining (E8). (2) The
+  queue screen polls the public snapshot endpoint every 5 s until the WebSocket
+  channel lands in M10.
+- **Rationale:** (1) PRODUCT_SPEC E8 requires nothing to be lost on refresh; the
+  token is a session-scoped secret by design (D31), and localStorage is the
+  standard place for a bearer token in an SPA. (2) Real-time push is M10; polling
+  the authoritative snapshot keeps this milestone simple and correct — the
+  frontend never synthesizes state.
+- **Rejected:** Cookies for the participant token (extra CSRF surface, no benefit
+  for a bearer-token SPA); a frontend state store that merges/owns queue state
+  (violates D2); relying on realtime events before M10.
+
+---
+
 ## Open questions (tracked)
 
 - ~~Authentication mechanism for hosts (email/password vs. school SSO)~~ — **M3

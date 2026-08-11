@@ -1,0 +1,76 @@
+// Types mirroring the backend Pydantic API contracts (docs/API_CONTRACT.md).
+// The backend is the single source of truth: these are the shapes the backend
+// returns, never client-owned state.
+
+export type SessionStatus =
+  | 'CREATED'
+  | 'ACTIVE'
+  | 'PAUSED'
+  | 'ROUND_COMPLETE'
+  | 'ENDED'
+
+export type QueueEntryStatus =
+  | 'WAITING'
+  | 'NEXT'
+  | 'SINGING'
+  | 'COMPLETED'
+  | 'SKIPPED'
+  | 'CANCELLED'
+  | 'REMOVED'
+
+export interface JoinSession {
+  id: string
+  name: string
+  status: SessionStatus
+}
+
+export interface Participant {
+  id: string
+  session_id: string
+  nickname: string
+  created_at: string
+}
+
+export interface JoinResult {
+  token: string
+  token_type: 'bearer'
+  session: JoinSession
+  participant: Participant
+}
+
+export interface SongPreview {
+  youtube_url: string
+  video_id: string
+  title: string
+  channel: string
+  duration_seconds: number
+  thumbnail_url: string
+  is_long: boolean
+  warning: string | null
+}
+
+export interface QueueEntry {
+  id: string
+  participant_name: string
+  status: QueueEntryStatus
+  video_id: string
+  youtube_url: string
+  title: string
+  channel: string
+  duration_seconds: number
+  thumbnail_url: string
+  position: number | null
+  created_at: string
+}
+
+export interface QueueSnapshot {
+  session_id: string
+  status: SessionStatus
+  queue: QueueEntry[]
+}
+
+export interface SongSubmitResult {
+  entry: QueueEntry
+  duplicate: boolean
+  notice: string | null
+}

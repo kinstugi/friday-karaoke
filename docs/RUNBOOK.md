@@ -94,6 +94,11 @@ npm run typecheck
 npm run lint
 ```
 
+The Vite dev server proxies `/api` to `http://localhost:8000`, so run the backend
+first (`uv run uvicorn app.main:app --reload` from `backend/`) and open
+`http://localhost:5173/join/<join-code>`. The join code comes from creating a
+session via the host API (see the verification checklist below).
+
 ## Verification checklist (M7)
 
 ```bash
@@ -141,16 +146,19 @@ curl -X PATCH http://localhost:8000/api/v1/entries/$ENTRY_ID/video \
 curl -X DELETE http://localhost:8000/api/v1/entries/$ENTRY_ID \
   -H "Authorization: Bearer $TOKEN"                                      # 204 (host remove)
 
-# Frontend (unchanged by M7)
-cd ../frontend && npm install && npm run build && npm run typecheck
+# Frontend (M8: participant queue UI)
+cd ../frontend && npm install && npm run build && npm run typecheck && npm run lint
+# Manual: with the backend running, open http://localhost:5173/join/<join-code>
+# on a phone-sized window -> join with a nickname -> add a song -> watch the queue.
 ```
 
 This satisfies the M7 acceptance criteria: multiple participants submit and the
 public snapshot returns the queue in deterministic submission order with
 computed positions. The active-entry limit (2), duplicate-song notice, participant
 cancel of own WAITING entries, and host remove/edit are enforced server-side.
-Health, host auth, sessions, join, and preview endpoints from M2-M6 are
-unchanged.
+The M8 participant screens (join/submit/queue) render exactly these backend
+responses; the frontend never owns queue state. Health, host auth, sessions,
+join, and preview endpoints from M2-M6 are unchanged.
 
 ## Branch / commit workflow
 

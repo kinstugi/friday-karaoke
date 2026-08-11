@@ -7,104 +7,85 @@ of every milestone. The persistent context lives in `PROJECT_BRAIN.md`.
 
 ## Current milestone
 
-**M7 — Queue Management** — COMPLETE (verified).
+**M8 — Participant Queue UI** — COMPLETE (verified). First frontend milestone.
 
 ## Current task
 
-None (milestone finished). Next milestone: **M8 — Participant Queue UI** (frontend).
+None (milestone finished). Next milestone: **M9 — Host Dashboard** (frontend).
 
-## M7 scope (plan.md §M7)
+## M8 scope (plan.md §M8)
 
-- Authoritative queue engine: `QueueEntry` + `YouTubeVideo` (+ `Round`) tables.
-- Submit a song (participant), public queue snapshot, cancel own WAITING entry
-  (participant), remove any entry + edit a YouTube URL (host).
-- Ordering by creation, not a mutable position field (B7/D8).
-- Active-entry limit (B15/D17) and duplicate-song notice (B16/D15).
+- Mobile-first participant queue experience (no host dashboard yet).
+- Screens: join (lookup + nickname), song submit (preview -> confirm), queue
+  (status, positions, own entries, cancel).
+- Participant actions: join, cancel own WAITING entry, view position, view queue.
 
-## Verification results (M7 acceptance criteria, plan.md §M7)
+## Verification results (M8 acceptance criteria, plan.md §M8)
 
 | Acceptance criterion | Result |
 | -------------------- | ------ |
-| Multiple users can join and queue order remains deterministic | Verified — two participants submit sequentially and the snapshot returns them in submission order with positions 1 and 2 (`test_snapshot_returns_deterministic_order_and_positions`); ordering is `created_at` (microsecond Python default) + `id` tie-break (D36), caught a real SQLite second-precision bug during development. |
+| A student can use the entire queue flow from a phone | Verified — `npm run typecheck` (0 errors), `npm run build` (ok), `npm run lint` (0 issues), plus an end-to-end smoke through the Vite dev proxy against a live backend on SQLite: SPA route `/join/{code}` serves 200; register/login/create session; public lookup by join code; participant join; empty queue snapshot; preview error path (503 without API key) all propagate correctly through `localhost:5173/api`. |
 
 Extra verification performed:
 
-- Submission guards: 401 without a token, 404 for a participant from another
-  session, 409 for ended sessions, 422 for bad URLs, 404 for unavailable videos,
-  409 at the active-entry limit (2 per participant per round, B15).
-- Duplicate songs are allowed with an informational notice, never a block (B16);
-  duplicate submissions share one `youtube_videos` row.
-- Participant cancel (B3): own WAITING → 204/CANCELLED; others' entries, foreign
-  sessions, and non-WAITING entries → 404/409.
-- Host remove (B4): any entry → REMOVED; non-owner host → 404. Host edit (E7):
-  position + participant preserved, invalid replacement keeps the old URL.
-- `alembic check`: no drift; migration `0005_queue` upgrade → downgrade → upgrade
-  verified on SQLite (round 1 is created by the service, not the migration).
-- `uv run pytest`: 158 passed (27 new). `uv run pyright`: 0 errors, 0 warnings.
-- Health, auth, sessions, join, preview endpoints unchanged and still green.
+- Routing: `/join/:code` (join), `/join/:code/queue` (queue), `/join/:code/submit`
+  (submit), `/join` landing, unknown -> redirect.
+- Identity persistence (D38): joining stores the token/session in localStorage;
+  refresh resumes the queue (E8).
+- Queue screen renders the backend-provided statuses only: "Now singing" shows the
+  SINGING entry; "Up next" shows the backend's NEXT entry, or the first non-singing
+  queued entry while playback is not yet running (M11 assigns real statuses); own
+  WAITING entries get a Cancel button.
+- Backend suite unchanged: **158 passed**, pyright 0/0 (no backend code touched).
 
-## Files changed (M7)
+## Files changed (M8)
 
 ```text
-backend/app/domain/queue_entry.py        (new — QueueEntryStatus enum)
-backend/app/models/youtube_video.py      (new — YouTubeVideo metadata row)
-backend/app/models/round.py              (new — Round, created with the session)
-backend/app/models/queue_entry.py        (new — QueueEntry + relationships)
-backend/app/models/__init__.py           (register new models)
-backend/app/services/session.py          (create round 1 with the session)
-backend/app/services/queue.py            (new — QueueService: submit/snapshot/cancel/remove/edit)
-backend/app/schemas/queue.py             (new — submit/snapshot/entry schemas)
-backend/app/api/routes/entries.py        (+ submit, snapshot, delete, edit endpoints)
-backend/app/api/dependencies.py          (+ get_host_or_participant)
-backend/app/main.py                      (include entry_router)
-backend/alembic/versions/0005_queue.py   (new — youtube_videos, rounds, queue_entries)
-backend/tests/test_queue.py              (new — 27 tests)
-docs/API_CONTRACT.md                     (§5 songs/queue implemented)
-docs/DECISIONS.md                        (D35 rounds at creation, D36 ordering, D37 shared video rows/dual-actor delete)
-docs/ARCHITECTURE.md                     (§3 implementation status, §7 phases)
-docs/PROJECT_BRAIN.md                    (milestones, limitations, decisions)
-docs/DEV_BRAIN.md                        (updated, this file)
-docs/RUNBOOK.md                          (M7 checklist + queue smoke test)
+frontend/package.json / package-lock.json   (+ react-router-dom)
+frontend/vite.config.ts                     (dev proxy: /api -> http://localhost:8000)
+frontend/src/api/types.ts                   (new — TS types mirroring backend schemas)
+frontend/src/api/client.ts                  (new — typed fetch wrapper + ApiError)
+frontend/src/api/session.ts                 (new — join lookup + register)
+frontend/src/api/entries.ts                 (new — preview, submit, snapshot, cancel)
+frontend/src/lib/token.ts                   (new — participant identity in localStorage, D38)
+frontend/src/lib/format.ts                  (new — duration formatting)
+frontend/src/features/join/JoinScreen.tsx   (new — session lookup + nickname join)
+frontend/src/features/submit/SubmitSongScreen.tsx (new — URL -> preview -> add)
+frontend/src/features/queue/QueueScreen.tsx (new — polled snapshot, positions, cancel)
+frontend/src/App.tsx                        (router: join/queue/submit routes)
+frontend/src/index.css / App.css            (mobile-first styles, >=44px touch targets)
+docs/DECISIONS.md                           (D38 participant identity + polling)
+docs/ARCHITECTURE.md                        (§4 frontend structure now implemented)
+docs/PROJECT_BRAIN.md                       (milestones, limitations)
+docs/DEV_BRAIN.md                           (updated, this file)
+docs/RUNBOOK.md                             (M8 checklist)
 ```
 
-## Implementation notes (M7)
+## Implementation notes (M8)
 
-- **Rounds (D35):** `rounds` table with `(session_id, number)` unique; round 1 is
-  created in the same transaction as the session. Queue entries, positions, and
-  the active-entry limit are scoped to the session's latest round; M16 adds
-  round N+1 without schema changes.
-- **Ordering (D36):** `ORDER BY created_at, id`; `created_at` is assigned in
-  Python (microsecond) because SQLite's `CURRENT_TIMESTAMP` is second-precision
-  and scrambled same-second submissions (reproduced by a test before the fix).
-- **Positions (D8):** computed from the ordered active queue when rendered;
-  `position` in responses is derived (never stored).
-- **YouTubeVideo (D37):** one immutable metadata row per unique video id,
-  find-or-create with race handling (unique-index IntegrityError → re-select).
-  Duplicate songs share the row; host edits point the entry at a new row.
-- **Dual-actor DELETE (D37):** `get_host_or_participant` resolves the token as a
-  participant (→ cancel) or host (→ remove); foreign entries/sessions → 404.
-- **Active-entry limit (B15/D17):** 2 non-terminal entries (WAITING/NEXT/SINGING)
-  per participant per round, counted server-side before insert.
-- **Relationships:** `QueueEntry.participant/youtube_video/round` use
-  `lazy="selectin"` (no N+1, no async lazy-load pitfalls). The host-edit path
-  explicitly refreshes `youtube_video` after commit (the identity map otherwise
-  serves the stale relationship).
-- **FastAPI D30 rule respected:** new endpoints are `submit_song`,
-  `queue_snapshot`, `delete_entry`, `edit_entry_video`; none collide with the
-  `get_session`/`get_current_host`/`get_current_participant`/
-  `get_host_or_participant` dependency names.
+- **Frontend never owns state (D2):** every screen renders backend responses; the
+  only client-side persistence is the participant *identity* (token/session) in
+  localStorage (D38). No queue state is stored or merged client-side.
+- **Typed API client:** `src/api/` wraps `fetch` with `apiRequest<T>` (JSON,
+  bearer header, 204 handling, `ApiError` carrying the backend `detail` message);
+  `types.ts` mirrors the backend Pydantic contracts so the UI compiles against
+  the real shapes.
+- **Routing:** `react-router-dom` BrowserRouter; the join URL produced by the
+  backend (`{public_base_url}/join/{code}`) maps to `/join/:code`. After joining,
+  identity is saved and the app redirects to `/join/:code/queue`.
+- **Polling (D38):** QueueScreen polls `GET /api/v1/sessions/{id}/entries` every
+  5 s (5 s is a placeholder for the M10 WebSocket channel). Now/next cards are
+  derived purely from the entry `status` values the backend returns.
+- **Vite proxy:** dev server proxies `/api` to `http://localhost:8000`, so the
+  SPA uses same-origin paths (no CORS config needed in dev; M20 reverse proxy
+  does the same in production).
+- **No test framework added:** the plan's testing choice is backend pytest; the
+  frontend quality gates remain `npm run typecheck` / `build` / `lint` plus the
+  e2e smoke above. Adding vitest is not in scope.
 
-## Tests added (M7)
+## Tests added (M8)
 
-- `tests/test_queue.py` — 27 tests: submit (auth, WAITING entry shape, cross-
-  session 404, ended 409, bad URL 422, unavailable 404, active-entry limit 409,
-  duplicate notice, cancel-frees-a-slot), snapshot (public, deterministic order +
-  positions, excludes processed, unknown 404), cancel (auth, own WAITING 204,
-  others' 404, foreign session 404, non-WAITING 409, unknown 404), remove (host
-  any entry, non-owner 404, unknown 404), edit (host-only auth, keeps position +
-  participant, non-owner 404, invalid URL keeps old video), persistence (entries
-  + shared video row).
-- **158 passed** total (was 131 at M6).
+- None (frontend). Backend suite unchanged: **158 passed**.
 
 ## Current blockers
 
@@ -121,8 +102,8 @@ docs/RUNBOOK.md                          (M7 checklist + queue smoke test)
 
 ## Next recommended task
 
-**M8 — Participant Queue UI** (frontend): mobile-first queue screen using the
-public snapshot endpoint from M7 — current singer, up next, queue with the
-participant's position highlighted, submit song via preview + confirm, cancel
-own WAITING entry, next-round prompt stub. First frontend milestone; see
-`plan.md` §M8 and `docs/PRODUCT_SPEC.md` §6.5-6.6 / §7.1-7.3.
+**M9 — Host Dashboard** (frontend): the host's single control screen for the
+projector — current singer/song/playback status, full queue (names, titles,
+durations), and actions (start, skip, remove, edit, pause/resume, end session),
+using the host endpoints from M4/M7. See `plan.md` §M9 and `docs/PRODUCT_SPEC.md`
+§5.3-5.7 / §7.4.
