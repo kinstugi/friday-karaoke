@@ -94,7 +94,7 @@ npm run typecheck
 npm run lint
 ```
 
-## Verification checklist (M3)
+## Verification checklist (M4)
 
 ```bash
 # From the repo root
@@ -116,17 +116,30 @@ curl -X POST http://localhost:8000/api/v1/auth/host/login \
 TOKEN=<token from the login response>
 curl http://localhost:8000/api/v1/auth/host/me -H "Authorization: Bearer $TOKEN"  # 200
 curl http://localhost:8000/api/v1/auth/host/me                                   # 401
-curl -X POST http://localhost:8000/api/v1/auth/host/logout -H "Authorization: Bearer $TOKEN"  # 204
-curl http://localhost:8000/api/v1/auth/host/me -H "Authorization: Bearer $TOKEN"  # 401 now
 
-# Frontend (unchanged by M3)
+# Session smoke test (real PostgreSQL)
+curl -X POST http://localhost:8000/api/v1/sessions \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{}'
+#   -> 201 {"id": "...", "name": "Friday Karaoke - 2026-08-11", "join_code": "K7X3QP",
+#           "join_url": "http://localhost:5173/join/K7X3QP", "status": "CREATED", ...}
+SESSION_ID=<id from the create response>
+curl http://localhost:8000/api/v1/sessions/$SESSION_ID -H "Authorization: Bearer $TOKEN"        # 200
+curl -X POST http://localhost:8000/api/v1/sessions/$SESSION_ID/start -H "Authorization: Bearer $TOKEN"  # 200, status ACTIVE
+curl -X POST http://localhost:8000/api/v1/sessions/$SESSION_ID/start -H "Authorization: Bearer $TOKEN"  # 409 (already active)
+curl -X POST http://localhost:8000/api/v1/sessions/$SESSION_ID/end -H "Authorization: Bearer $TOKEN"    # 200, status ENDED
+curl -X POST http://localhost:8000/api/v1/sessions -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{}'
+#   -> 201; try GET with no token -> 401; with a second host's token -> 404
+
+# Frontend (unchanged by M4)
 cd ../frontend && npm install && npm run build && npm run typecheck
 ```
 
-This satisfies the M3 acceptance criteria: anonymous users cannot create sessions
-(session creation is M4; the `/me` guard is verified), authenticated hosts can
-access host endpoints, and each token is bound to exactly one host (the foundation
-for M4's cross-host ownership checks). Health endpoints from M2 are unchanged.
+This satisfies the M4 acceptance criteria: a host creates a session
+(`Friday Karaoke - <date>` default name) and receives a join code and join URL
+(the QR flow itself is M5). Session state transitions are server-enforced
+(start `CREATED -> ACTIVE`, end `-> ENDED`), cross-host access returns 404, and
+invalid transitions return 409. Health + host auth from M2/M3 are unchanged.
 
 ## Branch / commit workflow
 

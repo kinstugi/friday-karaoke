@@ -51,45 +51,56 @@ the intended target state for v1.
 
 ## 3. Backend structure
 
-Layout (implemented at M2: packages exist; `domain/` and `repositories/` are
-placeholders; `services/` gained its first real use-case at M3 — host auth):
+Layout (implemented at M2: packages exist; `domain/` and `repositories/` were
+placeholders; `services/` gained its first real use-case at M3 — host auth;
+`domain/` gained its first real model at M4 — `SessionStatus`):
 
 ```text
 backend/
     app/
-        api/          # HTTP + WebSocket endpoints/routers (health router M2, auth router M3)
+        api/          # HTTP + WebSocket endpoints/routers (health M2, auth M3, sessions M4)
         core/         # config (Pydantic Settings), structured logging, database, security
-        domain/       # domain models, enums, business rules, state machines (M4+)
-        services/     # application use-cases / orchestration (host auth M3; sessions M4+)
-        repositories/ # persistence access (SQLAlchemy) (M4+)
-        models/       # SQLAlchemy ORM models (Base, Host, HostAuthToken; more M4+)
-        schemas/      # Pydantic API schemas (health M2; auth M3)
+        domain/       # domain models, enums, business rules, state machines (SessionStatus M4)
+        services/     # application use-cases / orchestration (host auth M3, sessions M4)
+        repositories/ # persistence access (SQLAlchemy) (deferred until M4+ shared)
+        models/       # SQLAlchemy ORM models (Base, Host, HostAuthToken, Session)
+        schemas/      # Pydantic API schemas (health M2; auth M3; sessions M4)
         main.py       # FastAPI app factory / entry point
     tests/            # pytest suite (self-contained: in-memory SQLite)
-    alembic/          # migrations (async env; 0001 initial, 0002 host auth)
+    alembic/          # migrations (async env; 0001 initial, 0002 host auth, 0003 sessions)
     alembic.ini
 ```
 
-Implementation status at M3:
+Implementation status at M4:
 
 - **Configuration:** Pydantic Settings (`app/core/config.py`), env prefix
   `KARAOKE_`, `.env` file support, cached singleton via `get_settings()`. Auth
-  token lifetime configurable via `KARAOKE_AUTH_TOKEN_TTL_DAYS` (default 30).
+  token lifetime via `KARAOKE_AUTH_TOKEN_TTL_DAYS` (default 30, M3). Public
+  frontend base URL via `KARAOKE_PUBLIC_BASE_URL` (default `http://localhost:5173`,
+  M4) used to derive session join URLs.
 - **Database:** async SQLAlchemy engine + session factory + `get_session`
   dependency (`app/core/database.py`); PostgreSQL via `asyncpg`, in-memory SQLite
-  for tests. Models: `Host` and `HostAuthToken` (UUID primary keys via
+  for tests. Models: `Host`, `HostAuthToken` (M3), `Session` (M4, UUID PKs via
   `sqlalchemy.Uuid`, dialect-safe on both PostgreSQL and SQLite).
 - **Security:** bcrypt password hashing, opaque bearer token generation, SHA-256
   token digesting (`app/core/security.py`).
-- **Services:** `HostAuthService` (`app/services/host_auth.py`) — register, login
-  (issues a revocable token), logout (revokes), and token-based host lookup.
-- **API:** health endpoints unchanged; host auth endpoints under `/api/v1/auth/host`
-  (register/login/logout/me). `get_current_host` dependency
-  (`app/api/dependencies.py`) enforces `Authorization: Bearer <token>` on host
-  endpoints. Business endpoints use the `/api/v1` base path (D26); health stays at
-  the root.
+- **Domain:** `SessionStatus` enum + transition rules (`app/domain/session.py`,
+  M4) mirroring the documented lifecycle
+  `CREATED -> ACTIVE <-> PAUSED -> ROUND_COMPLETE -> ENDED`; `ENDED` is terminal
+  and reachable from any other state.
+- **Services:** `HostAuthService` (`app/services/host_auth.py`) — register, login,
+  logout, token-based host lookup (M3). `SessionService`
+  (`app/services/session.py`) — create (unique join code), get-for-host (ownership
+  enforced), start/end (state machine enforced) (M4).
+- **API:** health endpoints unchanged; host auth under `/api/v1/auth/host`
+  (M3); sessions under `/api/v1/sessions` (create/get/start/end, M4).
+  `get_current_host` dependency (`app/api/dependencies.py`) enforces
+  `Authorization: Bearer <token>` on host endpoints; session ownership is
+  enforced in the service (cross-host → 404, D29). Business endpoints use the
+  `/api/v1` base path (D26); health stays at the root.
 - **Migrations:** Alembic async env wired to application settings; revisions
-  `0001_initial` (empty anchor) and `0002_host_auth` (hosts + host_auth_tokens).
+  `0001_initial`, `0002_host_auth` (hosts + host_auth_tokens), `0003_sessions`
+  (sessions). `alembic check` reports no drift.
 
 Rules:
 
@@ -165,7 +176,10 @@ get correct state from the API.
 - **M3** — host authentication (complete): email/password registration/login,
   bcrypt password hashing, opaque revocable bearer tokens (hashed at rest), logout,
   `/api/v1` base path confirmed, `Host` + `HostAuthToken` tables.
-- **M4–M9** — vertical slice: sessions, join flow, YouTube metadata, queue,
+- **M4** — karaoke session creation (complete): host-owned sessions
+  (create/get/start/end), `SessionStatus` domain state machine, unique join codes,
+  derived join URLs, `Session` table.
+- **M5–M9** — vertical slice: join flow, YouTube metadata, queue,
   participant UI, host dashboard.
 - **M10–M16** — realtime + playback + rounds + notifications.
 - **M17–M19** — security, testing, PWA/mobile UX.

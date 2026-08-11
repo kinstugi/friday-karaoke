@@ -165,11 +165,20 @@ limit, sessions not tied to a browser) are in `docs/PRODUCT_SPEC.md` §8–§9 a
 
 ## 8. Current milestone
 
-**M4 — Karaoke Session Creation** (next). M3 is complete; see
-`docs/DEV_BRAIN.md` for live status.
+**M5 — Public QR Join Flow** (next). M4 is complete; see `docs/DEV_BRAIN.md`
+for live status.
 
 ## 9. Completed milestones
 
+- **M4 — Karaoke Session Creation** (complete): host-owned sessions with
+  create/get/start/end under `/api/v1/sessions` (auth via `get_current_host`,
+  cross-host access → 404), the `SessionStatus` domain state machine
+  (`CREATED -> ACTIVE <-> PAUSED -> ROUND_COMPLETE -> ENDED`), 6-char
+  unambiguous unique join codes (D27), derived join URLs from
+  `KARAOKE_PUBLIC_BASE_URL` (D28), ownership + strict-transition semantics (D29),
+  `Session` table (migration `0003_sessions`), and a documented FastAPI 0.141.1
+  dependency-name collision workaround (D30 — never name an endpoint like a
+  dependency). Sessions decisions D27–D30 recorded in `docs/DECISIONS.md`.
 - **M3 — Host Authentication** (complete): host registration/login with
   email/password, bcrypt password hashing, opaque revocable bearer tokens (only a
   SHA-256 digest stored), logout, the `get_current_host` dependency protecting host
@@ -195,9 +204,10 @@ limit, sessions not tied to a browser) are in `docs/PRODUCT_SPEC.md` §8–§9 a
 
 ## 10. Known limitations
 
-- No business functionality beyond host auth yet (sessions, queue, playback land
-  from M4).
-- Only the `Host` and `HostAuthToken` domain tables exist (migration `0002`).
+- No participant-side functionality yet (join flow, queue, playback land from M5).
+- Only the `Host`, `HostAuthToken`, and `Session` domain tables exist (migration
+  `0003`). PAUSED and ROUND_COMPLETE session states are defined but not reachable
+  yet (M14/M16).
 - Host bearer tokens are long-lived (30 days) unless logged out; fine for the
   pilot, token rotation/refresh is not in scope for v1.
 - Browser autoplay policies will require host interaction before audio playback
@@ -205,6 +215,9 @@ limit, sessions not tied to a browser) are in `docs/PRODUCT_SPEC.md` §8–§9 a
 - The automated test suite uses in-memory SQLite; Postgres-specific SQL should be
   avoided in domain code or handled dialect-aware (see DECISIONS D22). UUID columns
   use the generic `sqlalchemy.Uuid` type, which is dialect-safe.
+- FastAPI 0.141.1 has an unresolved dependency-name collision bug (D30): an
+  endpoint function sharing a `__name__` with a dependency breaks literal-suffix
+  routes. Workaround (naming convention) is in effect; watch for an upstream fix.
 
 ## 11. Important decisions
 
@@ -225,6 +238,10 @@ See `docs/DECISIONS.md` for the full, maintained list. Highlights:
 - Host auth: email/password + bcrypt, opaque revocable bearer tokens hashed at rest
   (D25); business API base path `/api/v1` confirmed, health endpoints stay at root
   (M3, DECISIONS D25–D26).
+- Sessions (M4): unambiguous 6-char unique join codes (D27), join URL derived from
+  `KARAOKE_PUBLIC_BASE_URL` and never stored (D28), cross-host access returns 404
+  and state transitions are strict server-side (D29), FastAPI 0.141.1
+  dependency-name collision workaround (D30).
 - No user-visible feature in M0 beyond a health check.
 
 ## 12. Commands for running / testing

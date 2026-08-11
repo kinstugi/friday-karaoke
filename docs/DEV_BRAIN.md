@@ -7,112 +7,106 @@ of every milestone. The persistent context lives in `PROJECT_BRAIN.md`.
 
 ## Current milestone
 
-**M3 — Host Authentication** — COMPLETE (verified).
+**M4 — Karaoke Session Creation** — COMPLETE (verified).
 
 ## Current task
 
-None (milestone finished). Next milestone: **M4 — Karaoke Session Creation**.
+None (milestone finished). Next milestone: **M5 — Public QR Join Flow**.
 
-## M3 scope (plan.md §M3)
+## M4 scope (plan.md §M4)
 
-- Host registration/login with email/password.
-- Password hashing (bcrypt).
-- Authentication tokens (opaque bearer tokens, revocable).
-- Authorization (host-only endpoints via `get_current_host`).
-- Logout (revokes the token).
-- Protected host endpoints (`GET /api/v1/auth/host/me`; the session endpoints
-  themselves land in M4 and reuse `get_current_host`).
+- Host creates a karaoke session (`Friday Karaoke - <date>` default name).
+- Session fields: `id`, `hostId`, `name`, `joinCode`, `status`, `createdAt`,
+  `startedAt`, `endedAt`.
+- `SessionStatus` enum: CREATED / ACTIVE / PAUSED / ROUND_COMPLETE / ENDED.
+- Create / get / start / end session APIs (host-owned, `get_current_host`).
+- Unique join-code generation; join URL derived from `KARAOKE_PUBLIC_BASE_URL`.
 
-## Verification results (M3 acceptance criteria, plan.md §M3)
+## Verification results (M4 acceptance criteria, plan.md §M4)
 
 | Acceptance criterion | Result |
 | -------------------- | ------ |
-| Anonymous users cannot create sessions | Session creation is M4; the auth infrastructure is verified by `GET /api/v1/auth/host/me` returning 401 without/with an invalid token. M4 session endpoints reuse `get_current_host`. |
-| Authenticated host can access host endpoints | Verified — `GET /me` returns 200 with the host profile using a login token (SQLite tests + real PostgreSQL smoke test). |
-| Another host cannot modify someone else's session | Sessions land in M4, but the foundation is verified: each token resolves to exactly the host it was issued to (`test_me_returns_own_host_not_another`). M4 ownership checks build on this. |
+| Host can create "Friday Karaoke - 2026-08-14" | Verified — `POST /api/v1/sessions` with no name returns `Friday Karaoke - <server local date>`; custom names are trimmed and used (`test_create_session_defaults_name`, `test_create_session_uses_custom_name`). |
+| Host receives a join URL/code | Verified — response includes a 6-char unambiguous `join_code` (unique across sessions) and `join_url = {KARAOKE_PUBLIC_BASE_URL}/join/{join_code}` (`test_join_codes_are_unique`, `test_join_url_is_derived_from_base_url`). |
 
 Extra verification performed:
 
-- Full curl smoke test against real PostgreSQL (uvicorn): register 201 (email
-  normalized lowercase), duplicate register 409, case-insensitive login 200 with
-  token, `/me` 200 with valid token and 401 with garbage token, anonymous 401,
-  logout 204, `/me` 401 after logout.
-- `alembic check` reports "No new upgrade operations detected" — the migration
-  exactly matches the ORM models.
-- Migration `0002_host_auth` verified on SQLite (upgrade → downgrade → upgrade) and
-  real PostgreSQL (native `uuid`, `timestamptz`, unique indexes, FK `ON DELETE
-  CASCADE`).
-- `/`, `/health`, `/health/ready` unchanged and still 200 against Postgres;
-  structured JSON logging confirmed on `uv run uvicorn`.
-- `uv run pytest`: 35 passed. `uv run pyright`: 0 errors, 0 warnings.
-- Frontend untouched (M3 is backend-only).
+- Full state machine: start `CREATED -> ACTIVE` stamps `started_at`; double start →
+  409; start after end → 409; end from any non-terminal state stamps `ended_at`;
+  double end → 409 (`app/domain/session.py` + endpoint tests).
+- Ownership: a second host gets `404 session not found` for the first host's
+  session on get/start/end (no existence leak, D29).
+- `alembic check` reports "No new upgrade operations detected" — migration
+  `0003_sessions` exactly matches the ORM models; upgrade → downgrade → upgrade
+  verified on SQLite.
+- `uv run pytest`: 64 passed (29 new session/state-machine tests). `uv run
+  pyright`: 0 errors, 0 warnings.
+- Health + host-auth endpoints unchanged and still green.
 
-## Files changed (M3)
+## Files changed (M4)
 
 ```text
-backend/pyproject.toml                (deps: bcrypt, email-validator)
-backend/uv.lock                       (updated)
-backend/app/core/config.py            (+ auth_token_ttl_days)
-backend/app/core/security.py          (new — bcrypt hash/verify, token gen/hash)
-backend/app/models/host.py            (new — Host)
-backend/app/models/host_auth_token.py (new — HostAuthToken)
-backend/app/models/__init__.py        (register new models)
-backend/app/schemas/auth.py           (new — register/login/host/auth responses)
-backend/app/services/host_auth.py     (new — HostAuthService)
-backend/app/api/dependencies.py       (new — bearer_scheme, get_current_host)
-backend/app/api/routes/auth.py        (new — /api/v1/auth/host router)
-backend/app/main.py                   (include auth router)
-backend/alembic/versions/0002_host_auth.py (new — hosts + host_auth_tokens)
-backend/tests/conftest.py             (+ autouse schema create/drop fixture)
-backend/tests/test_auth.py            (new — 19 endpoint/service tests)
-backend/tests/test_security.py        (new — 7 unit tests)
-backend/tests/test_config.py          (pin KARAOKE_AUTH_TOKEN_TTL_DAYS default)
-backend/.env.example                  (+ KARAOKE_AUTH_TOKEN_TTL_DAYS)
-docs/API_CONTRACT.md                  (§2 host auth implemented, base path confirmed)
-docs/DECISIONS.md                     (D25 opaque tokens, D26 base path; open Q resolved)
-docs/ARCHITECTURE.md                  (§3 implementation status, §7 phases)
-docs/PROJECT_BRAIN.md                 (milestones, limitations, decisions)
-docs/DEV_BRAIN.md                     (updated, this file)
+backend/app/domain/session.py              (new — SessionStatus enum + transitions)
+backend/app/models/session.py              (new — Session ORM model)
+backend/app/models/__init__.py             (+ Session)
+backend/app/schemas/session.py             (new — SessionCreateRequest, SessionResponse)
+backend/app/services/session.py            (new — SessionService: create/get/start/end, join code)
+backend/app/api/routes/sessions.py         (new — /api/v1/sessions router)
+backend/app/main.py                        (include sessions router)
+backend/alembic/versions/0003_sessions.py  (new — sessions table)
+backend/app/core/config.py                 (+ public_base_url)
+backend/.env.example                       (+ KARAOKE_PUBLIC_BASE_URL)
+backend/tests/test_sessions.py             (new — 29 tests: 24 endpoint + 5 unit)
+backend/tests/test_config.py               (pin KARAOKE_PUBLIC_BASE_URL default)
+docs/API_CONTRACT.md                       (§3 sessions implemented)
+docs/DECISIONS.md                          (D27 join code, D28 join URL, D29 ownership, D30 FastAPI bug)
+docs/ARCHITECTURE.md                       (§3 implementation status, §7 phases)
+docs/PROJECT_BRAIN.md                      (milestones, limitations, decisions)
+docs/DEV_BRAIN.md                          (updated, this file)
+docs/RUNBOOK.md                            (M4 checklist + session smoke test)
 ```
 
-## Implementation notes (M3)
+## Implementation notes (M4)
 
-- **Auth mechanism (D25):** opaque bearer tokens issued at login, stored only as a
-  SHA-256 digest (`host_auth_tokens.token_hash`). Logout deletes the row. Tokens
-  expire after `KARAOKE_AUTH_TOKEN_TTL_DAYS` (default 30). No JWT, no cookies.
-- **Passwords:** bcrypt via the `bcrypt` library directly (no passlib). API schemas
-  cap password length at 72 characters (bcrypt's byte limit) and require ≥ 8.
-- **Emails:** `EmailStr` (email-validator) + lowercase normalization in the
-  service; the `unique` constraint on the (lowercased) email gives case-insensitive
-  uniqueness on both SQLite and PostgreSQL.
-- **Layering:** `services/` gained its first real use-case (`HostAuthService`).
-  `repositories/` is still a placeholder — the service talks to the session
-  directly; a repository layer will be introduced at M4+ when persistence logic is
-  actually shared. `domain/` remains a placeholder (no domain enums needed for M3).
-- **UUIDs:** `sqlalchemy.Uuid` for all PK/FK columns — native `uuid` on PostgreSQL,
-  `CHAR(32)` on SQLite (dialect-safe per D22).
-- **Timezone safety:** token expiry is checked in Python (`_is_expired`) rather than
-  in SQL, because SQLite returns naive datetimes and PostgreSQL returns aware ones;
-  the helper normalizes the comparison.
-- **Expired-token handling:** expired tokens are treated as unknown (401
-  "invalid or expired token"); they are not auto-deleted (cleanup can come with M17).
-- **Logout is idempotent:** revoking an already-revoked/unknown token returns 204.
-- **Tests:** `conftest.py` gained an autouse fixture that drops/creates all tables
-  before every test (the test engine uses one in-memory SQLite DB via a static
-  pool, so per-test DDL gives isolation). `Host`/`HostAuthToken` registered in
-  `app/models/__init__.py` for both Alembic autogenerate and the test fixture.
+- **Domain state machine first:** `app/domain/session.py` defines `SessionStatus`
+  (all five documented states) and `can_transition_to` mirroring PRODUCT_SPEC §3.
+  The service applies these rules before mutating; the API maps violations to 409.
+  The `domain/` package placeholder is now real for sessions.
+- **Join codes (D27):** 6 uppercase chars from an unambiguous alphabet
+  (`ABCDEFGHJKLMNPQRSTUVWXYZ23456789` — no 0/O/1/I), unique index on
+  `sessions.join_code`, pre-checked at generation with a bounded retry (10).
+- **Join URL (D28):** derived, never stored — `{KARAOKE_PUBLIC_BASE_URL}/join/{code}`.
+  New setting `KARAOKE_PUBLIC_BASE_URL` (default `http://localhost:5173`).
+- **Ownership (D29):** every session query filters by `host_id`; unknown *or*
+  foreign sessions raise `SessionNotFoundError` → 404. Started/ended timestamps are
+  UTC-aware (`datetime.now(timezone.utc)`); `created_at` uses `server_default
+  func.now()` like the M3 models.
+- **Status column:** non-native `sa.Enum(SessionStatus, native_enum=False)` →
+  VARCHAR(32) with a server default `'CREATED'`, keeping the schema portable
+  across SQLite tests and PostgreSQL (D22).
+- **Repositories:** still a placeholder. The service talks to the database session
+  directly, consistent with M3's `HostAuthService`; a repository layer is deferred
+  until persistence is shared between services.
+- **FastAPI 0.141.1 bug (D30):** the GET endpoint was initially named
+  `get_session`, which collides with the `get_session` dependency by `__name__`.
+  On literal-suffix routes (`POST /{id}/start`, `/end`) FastAPI then invoked the
+  *endpoint* instead of the dependency and injected a constructed response model
+  (500). Root-caused with a minimal repro; fixed by naming the endpoint
+  `session_detail`. Rule going forward: **endpoint functions must never share a
+  `__name__` with a dependency function.**
 
-## Tests added (M3)
+## Tests added (M4)
 
-- `tests/test_security.py` — bcrypt hashing/verification (incl. malformed hash),
-  token generation uniqueness/opacity, deterministic SHA-256 digesting (7 tests).
-- `tests/test_auth.py` — registration (create, lowercase normalization, duplicate
-  conflict, invalid email, short/overlong password), login (token+bearer, case
-  insensitivity, wrong password, unknown email), protected `/me` (401 anonymous,
-  401 invalid token, returns own host, distinct hosts per token), logout (revokes,
-  requires auth), at-rest hygiene (bcrypt hash stored, token stored hashed not
-  plaintext), expired token rejected (19 tests).
-- **35 passed** total (was 9 at M2).
+- `tests/test_sessions.py` — 29 tests: session create (auth required, default
+  name, custom name, overlong name 422, owner persisted, unique join codes, join
+  URL derivation), get (auth, owned, another host 404, missing 404, bad UUID 422),
+  start (auth, CREATED→ACTIVE + `started_at`, another host 404, double start 409,
+  start-after-end 409), end (auth, active→ENDED + `ended_at`, created→ENDED,
+  another host 404, double end 409), plus 5 `SessionStatus` state-machine unit
+  tests (`test_created_can_start_and_end`, `test_created_cannot_skip_to_paused_or_round_complete`,
+  `test_ended_is_terminal`, `test_end_allowed_from_every_non_terminal_state`,
+  `test_start_only_allowed_from_created_and_active_neighbors`).
+- **64 passed** total (was 35 at M3).
 
 ## Current blockers
 
@@ -124,10 +118,13 @@ docs/DEV_BRAIN.md                     (updated, this file)
   realtime payload schemas (M10), Web Push (M15).
 - Starlette deprecation warning (`httpx` vs `httpx2` in `fastapi.testclient`) —
   non-blocking, tracked since M0.
+- FastAPI 0.141.1 dependency-name collision (D30): workaround documented; watch
+  for an upstream fix.
 
 ## Next recommended task
 
-**M4 — Karaoke Session Creation** — host-owned sessions with join codes; the
-`get_current_host` dependency from M3 is the authorization seam. See `plan.md`
-§M4 (session fields/statuses, create/get/start/end, unique join code, join URL)
-and `docs/PRODUCT_SPEC.md` §3/§5.
+**M5 — Public QR Join Flow** — public session lookup by join code
+(`GET /join/{joinCode}`), participant registration with nickname + opaque
+participant token, and QR generation/display. The join URL built in M4
+(`{public_base_url}/join/{code}`) is the exact surface M5 implements. See
+`plan.md` §M5 and `docs/PRODUCT_SPEC.md` §5.2/§6.

@@ -99,16 +99,64 @@ Notes (decision D25): tokens are opaque, random strings. Only their SHA-256
 digest is stored; a database leak does not expose usable tokens. Passwords are
 bcrypt-hashed. Emails are stored lowercase (case-insensitive uniqueness).
 
-## 3. Sessions (M4)
+## 3. Sessions (M4) — IMPLEMENTED
 
-| Method | Path                  | Auth | Description                    |
-| ------ | --------------------- | ---- | ------------------------------ |
-| POST   | /sessions             | host | Create session                |
-| GET    | /sessions/{id}        | host | Get session                   |
-| POST   | /sessions/{id}/start  | host | Start session                 |
-| POST   | /sessions/{id}/end    | host | End session                   |
+| Method | Path                       | Auth | Description                    |
+| ------ | -------------------------- | ---- | ------------------------------ |
+| POST   | /api/v1/sessions           | host | Create session                |
+| GET    | /api/v1/sessions/{id}      | host | Get session (owning host)     |
+| POST   | /api/v1/sessions/{id}/start| host | Start session (owning host)   |
+| POST   | /api/v1/sessions/{id}/end  | host | End session (owning host)     |
 
-Session creation returns `id`, `joinCode`, and a QR-friendly join URL.
+Session creation returns `id`, `name`, `joinCode`, a QR-friendly `joinUrl`, and
+`status`. Session state is a `SessionStatus` enum:
+
+```text
+CREATED -> ACTIVE <-> PAUSED -> ROUND_COMPLETE -> ENDED
+```
+
+`ENDED` is reachable from any other state; `PAUSED`/`ROUND_COMPLETE` are
+reachable in later milestones (M14/M16). Invalid transitions return `409`.
+Accessing a session that does not exist *or belongs to another host* returns
+`404 session not found` (no existence leak, decision D29).
+
+```text
+POST /api/v1/sessions                  Authorization: Bearer <token>
+{ }                                    # name optional; defaults below
+# or { "name": "Spring Concert Night" }
+
+201 {
+  "id": "d4c7a99f-...",
+  "name": "Friday Karaoke - 2026-08-14",   # default: "Friday Karaoke - <server date>"
+  "join_code": "K7X3QP",                   # unambiguous alphabet, 6 chars (D27)
+  "join_url": "http://localhost:5173/join/K7X3QP",   # {KARAOKE_PUBLIC_BASE_URL}/join/{code} (D28)
+  "status": "CREATED",
+  "created_at": "2026-08-10T22:43:00Z",
+  "started_at": null,
+  "ended_at": null
+}
+
+401 { "detail": "authentication required" }     # missing/invalid token
+422 { "detail": [...] }                          # name > 100 chars
+```
+
+```text
+GET /api/v1/sessions/{id}              Authorization: Bearer <token>
+200 { ...same shape as above... }
+404 { "detail": "session not found" }            # unknown id or another host's session
+
+POST /api/v1/sessions/{id}/start       Authorization: Bearer <token>
+200 { ..., "status": "ACTIVE", "started_at": "..." }   # CREATED -> ACTIVE
+409 { "detail": "session <id> cannot start from state ACTIVE" }  # already started/ended
+
+POST /api/v1/sessions/{id}/end         Authorization: Bearer <token>
+200 { ..., "status": "ENDED", "ended_at": "..." }   # any non-terminal -> ENDED
+409 { "detail": "session <id> is already ended" }
+```
+
+Notes: only the owning host can get/start/end a session (decision D29). The join
+URL is derived from the join code and `KARAOKE_PUBLIC_BASE_URL`; it is never
+stored. QR generation and the `/join/{code}` lookup land in M5.
 
 ## 4. Public join (M5)
 

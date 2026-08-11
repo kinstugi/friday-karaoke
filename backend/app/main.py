@@ -10,7 +10,7 @@ milestones.
 from fastapi import FastAPI
 
 from app import __version__
-from app.api.routes import auth, health
+from app.api.routes import auth, health, sessions
 from app.core.config import get_settings
 from app.core.logging import setup_logging
 
@@ -27,6 +27,7 @@ def create_app() -> FastAPI:
     )
     application.include_router(health.router)
     application.include_router(auth.router)
+    application.include_router(sessions.router)
     return application
 
 

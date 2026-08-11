@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://karaoke:karaoke@localhost:5432/karaoke"
     #: Lifetime of a host bearer token (M3). Logout revokes it early.
     auth_token_ttl_days: int = 30
+    #: Public base URL of the frontend, used to build session join URLs (M4).
+    #: Defaults to the Vite dev server; set to the deployed frontend in prod.
+    public_base_url: str = "http://localhost:5173"
 
 
 @lru_cache

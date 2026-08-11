@@ -285,6 +285,77 @@ These freeze MVP product behavior. They were captured in `docs/PRODUCT_SPEC.md`.
 
 ---
 
+## M4 session-creation decisions
+
+## D27. Join codes: short, unambiguous, unique
+
+- **Status:** Accepted
+- **Decision:** Every session gets a 6-character uppercase join code drawn from
+  the alphabet `ABCDEFGHJKLMNPQRSTUVWXYZ23456789` (no `0`/`O`/`1`/`I`). Codes are
+  unique per session (unique index on `sessions.join_code`) and are generated with
+  a pre-check + bounded retry (10 attempts) before inserting.
+- **Rationale:** A school night has dozens of sessions at most, so 32^6
+  combinations make collisions effectively impossible; the pre-check plus the
+  unique index is a belt-and-suspenders approach. Excluding confusable characters
+  means a student can read the code off a projector or type it reliably. Uppercase
+  avoids case-sensitivity confusion (M5 lookup uppercases input).
+- **Rejected:** Lowercase/mixed-case codes (case confusion); 4-character codes
+  (too few combinations); storing a full random UUID as the join code (too long to
+  type).
+
+## D28. Join URL is derived, not stored
+
+- **Status:** Accepted
+- **Decision:** The session response includes `join_url =
+  {KARAOKE_PUBLIC_BASE_URL}/join/{join_code}`. Only the join code is persisted;
+  the URL is computed at the API boundary from the new
+  `KARAOKE_PUBLIC_BASE_URL` setting (default `http://localhost:5173`, the Vite
+  dev server; set to the deployed frontend in production).
+- **Rationale:** The frontend host is deployment-dependent and can change
+  without invalidating session data; storing it would go stale. The join code is
+  the stable, authoritative identifier — the QR (M5) simply encodes the derived
+  URL.
+- **Rejected:** Storing `join_url` in the database (redundant, goes stale);
+  hard-coding the frontend origin (breaks prod).
+
+## D29. Session ownership + strict state machine
+
+- **Status:** Accepted
+- **Decision:** Session endpoints require a host bearer token
+  (`get_current_host`, M3) and are scoped to the **owning host**:
+  `GET/start/end` on a session that does not exist *or* belongs to another host
+  returns `404 session not found` (indistinguishable on purpose). State
+  transitions are enforced server-side by the `SessionStatus` state machine
+  (`app.domain.session`): `start` only from `CREATED`, `end` from any
+  non-terminal state; invalid transitions return `409`.
+- **Rationale:** M3's acceptance criterion "another host cannot modify someone
+  else's session" needs an enforcement point — 404 avoids leaking that a session
+  exists. The state machine makes the documented lifecycle
+  (`CREATED -> ACTIVE <-> PAUSED -> ROUND_COMPLETE -> ENDED`) explicit and
+  testable, and prevents double-start/double-end corruption.
+- **Rejected:** Returning `403` for another host's session (leaks existence);
+  idempotent no-op on already-ended sessions (masks state bugs).
+
+## D30. FastAPI 0.141.1 dependency-name collision (bug workaround)
+
+- **Status:** Accepted (workaround for an upstream bug)
+- **Decision:** Endpoint functions must never share a `__name__` with a
+  dependency function. In M4 the GET endpoint was initially named `get_session`,
+  colliding with the `app.core.database.get_session` dependency; on routes with a
+  literal suffix after a path parameter (`POST /sessions/{id}/start` and
+  `/end`), FastAPI 0.141.1 then invoked the *endpoint* instead of the dependency
+  and injected a constructed response-model instance into the dependency
+  parameter (500/AttributeError). The endpoint is named `session_detail`.
+- **Rationale:** 0.141.1 is the latest FastAPI and the project already depends on
+  it (M2/M3 used the same version); no upstream fix is released. The workaround is
+  a naming convention — zero API-contract impact (the path is unchanged) and no
+  dependency downgrade. Verified with a minimal repro before applying.
+- **Rejected:** Downgrading FastAPI (risky project-wide change for a naming
+  nit); changing the API contract to avoid `/{id}/start` paths (breaks the frozen
+  contract).
+
+---
+
 ## Open questions (tracked)
 
 - ~~Authentication mechanism for hosts (email/password vs. school SSO)~~ — **M3

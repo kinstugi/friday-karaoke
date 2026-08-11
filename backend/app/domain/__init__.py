@@ -1,6 +1,7 @@
 """Domain layer: domain models, enums, business rules, and state machines.
 
-Populated from M4 onward (SessionStatus, QueueEntryStatus, PlaybackState,
-round logic). Kept separate from persistence (``app.models``) and API
-schemas (``app.schemas``).
+Holds ``SessionStatus`` (M4, see ``app.domain.session``). QueueEntryStatus,
+PlaybackState, and round logic arrive with later milestones (M7/M11/M16).
+Kept separate from persistence (``app.models``) and API schemas
+(``app.schemas``).
 """
