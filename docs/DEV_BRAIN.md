@@ -7,85 +7,99 @@ of every milestone. The persistent context lives in `PROJECT_BRAIN.md`.
 
 ## Current milestone
 
-**M8 — Participant Queue UI** — COMPLETE (verified). First frontend milestone.
+**M9 — Host Dashboard** — COMPLETE (verified). The host's single control screen
+for the projector.
 
 ## Current task
 
-None (milestone finished). Next milestone: **M9 — Host Dashboard** (frontend).
+None (milestone finished). Next milestone: **M10 — Realtime updates**
+(FastAPI WebSockets; queue/participant/host push with resync).
 
-## M8 scope (plan.md §M8)
+## M9 scope (plan.md §M9)
 
-- Mobile-first participant queue experience (no host dashboard yet).
-- Screens: join (lookup + nickname), song submit (preview -> confirm), queue
-  (status, positions, own entries, cancel).
-- Participant actions: join, cancel own WAITING entry, view position, view queue.
+- Host auth screens (login/register, M3) and host identity persistence.
+- Host home: create session + list own sessions (new `GET /api/v1/sessions`).
+- Host dashboard for one session: current singer, current song, playback status,
+  full queue (participant names, song titles, durations), QR + join code.
+- Host actions backed by existing M4/M7 endpoints: start session, remove entry,
+  edit entry URL, end session.
+- Skip/finish/pause/resume rendered disabled (D40) — they need the M11 playback
+  state machine, which is not part of M9.
 
-## Verification results (M8 acceptance criteria, plan.md §M8)
+## Verification results (M9 acceptance criteria, plan.md §M9)
 
 | Acceptance criterion | Result |
 | -------------------- | ------ |
-| A student can use the entire queue flow from a phone | Verified — `npm run typecheck` (0 errors), `npm run build` (ok), `npm run lint` (0 issues), plus an end-to-end smoke through the Vite dev proxy against a live backend on SQLite: SPA route `/join/{code}` serves 200; register/login/create session; public lookup by join code; participant join; empty queue snapshot; preview error path (503 without API key) all propagate correctly through `localhost:5173/api`. |
+| Host dashboard usable on a projector/TV | Verified — projector/TV CSS (large text, high contrast, minimal scrolling for current/next; two-column layout collapsing under 60rem) + `npm run typecheck` (0 errors), `npm run build` (ok), `npm run lint` (0 issues) |
+| One screen to control karaoke | Verified via live smoke through the Vite dev proxy against PostgreSQL: `/host/login`, `/host`, `/host/sessions/:id`, `/join*` all serve 200; register → login → create session → list sessions → QR (200 `image/svg+xml`) → public snapshot → start (ACTIVE) → end (ENDED) all propagate through `localhost:5173/api`. Host remove/edit use the existing M7 endpoints (404 on missing entries; 503 only when the YouTube API key is unset — pre-existing M7 behavior). |
 
 Extra verification performed:
 
-- Routing: `/join/:code` (join), `/join/:code/queue` (queue), `/join/:code/submit`
-  (submit), `/join` landing, unknown -> redirect.
-- Identity persistence (D38): joining stores the token/session in localStorage;
-  refresh resumes the queue (E8).
-- Queue screen renders the backend-provided statuses only: "Now singing" shows the
-  SINGING entry; "Up next" shows the backend's NEXT entry, or the first non-singing
-  queued entry while playback is not yet running (M11 assigns real statuses); own
-  WAITING entries get a Cancel button.
-- Backend suite unchanged: **158 passed**, pyright 0/0 (no backend code touched).
+- Routing: `/host/login` (auth), `/host` (home), `/host/sessions/:sessionId`
+  (dashboard), unknown -> redirect. Participant routes unchanged.
+- Host identity persistence (D39): login stores token/email/hostId in
+  localStorage; refresh resumes the home screen (E11); logout revokes + clears.
+- Dashboard renders only backend state: now/next derived from entry `status`
+  values (SINGING/NEXT/WAITING — M11 assigns real statuses), session status
+  from the authoritative session + snapshot.
+- Backend suite: **163 passed** (+5 for the new list endpoint), pyright 0/0.
 
-## Files changed (M8)
+## Files changed (M9)
 
 ```text
-frontend/package.json / package-lock.json   (+ react-router-dom)
-frontend/vite.config.ts                     (dev proxy: /api -> http://localhost:8000)
-frontend/src/api/types.ts                   (new — TS types mirroring backend schemas)
-frontend/src/api/client.ts                  (new — typed fetch wrapper + ApiError)
-frontend/src/api/session.ts                 (new — join lookup + register)
-frontend/src/api/entries.ts                 (new — preview, submit, snapshot, cancel)
-frontend/src/lib/token.ts                   (new — participant identity in localStorage, D38)
-frontend/src/lib/format.ts                  (new — duration formatting)
-frontend/src/features/join/JoinScreen.tsx   (new — session lookup + nickname join)
-frontend/src/features/submit/SubmitSongScreen.tsx (new — URL -> preview -> add)
-frontend/src/features/queue/QueueScreen.tsx (new — polled snapshot, positions, cancel)
-frontend/src/App.tsx                        (router: join/queue/submit routes)
-frontend/src/index.css / App.css            (mobile-first styles, >=44px touch targets)
-docs/DECISIONS.md                           (D38 participant identity + polling)
-docs/ARCHITECTURE.md                        (§4 frontend structure now implemented)
-docs/PROJECT_BRAIN.md                       (milestones, limitations)
-docs/DEV_BRAIN.md                           (updated, this file)
-docs/RUNBOOK.md                             (M8 checklist)
+backend/app/services/session.py              (+ SessionService.list_for_host, M9)
+backend/app/api/routes/sessions.py           (+ GET /api/v1/sessions list endpoint)
+backend/tests/test_sessions.py               (+ 5 tests: list endpoint)
+frontend/src/api/types.ts                    (+ HostProfile, HostLoginResult, Session)
+frontend/src/api/client.ts                   (+ apiRequestText for SVG QR)
+frontend/src/api/host.ts                     (new — host auth + session APIs + QR)
+frontend/src/api/entries.ts                  (+ removeEntry, editEntryVideo)
+frontend/src/lib/hostToken.ts                (new — host identity in localStorage, D39)
+frontend/src/lib/session.ts                  (new — shared statusLabel helper)
+frontend/src/features/host/HostAuthScreen.tsx (new — login/register)
+frontend/src/features/host/HostHomeScreen.tsx (new — create + list sessions)
+frontend/src/features/host/HostDashboardScreen.tsx (new — the dashboard)
+frontend/src/features/queue/QueueScreen.tsx  (use shared statusLabel)
+frontend/src/App.tsx                         (+ /host routes, host link on landing)
+frontend/src/App.css                         (+ host dashboard projector/TV styles)
+docs/DECISIONS.md                            (D39 host identity + session list; D40 playback actions disabled)
+docs/API_CONTRACT.md                         (GET /api/v1/sessions documented)
+docs/ARCHITECTURE.md                         (frontend structure, backend API, rules)
+docs/PROJECT_BRAIN.md                        (milestones, limitations, decisions)
+docs/DEV_BRAIN.md                            (updated, this file)
+docs/RUNBOOK.md                              (M9 checklist)
 ```
 
-## Implementation notes (M8)
+## Implementation notes (M9)
 
-- **Frontend never owns state (D2):** every screen renders backend responses; the
-  only client-side persistence is the participant *identity* (token/session) in
-  localStorage (D38). No queue state is stored or merged client-side.
-- **Typed API client:** `src/api/` wraps `fetch` with `apiRequest<T>` (JSON,
-  bearer header, 204 handling, `ApiError` carrying the backend `detail` message);
-  `types.ts` mirrors the backend Pydantic contracts so the UI compiles against
-  the real shapes.
-- **Routing:** `react-router-dom` BrowserRouter; the join URL produced by the
-  backend (`{public_base_url}/join/{code}`) maps to `/join/:code`. After joining,
-  identity is saved and the app redirects to `/join/:code/queue`.
-- **Polling (D38):** QueueScreen polls `GET /api/v1/sessions/{id}/entries` every
-  5 s (5 s is a placeholder for the M10 WebSocket channel). Now/next cards are
-  derived purely from the entry `status` values the backend returns.
-- **Vite proxy:** dev server proxies `/api` to `http://localhost:8000`, so the
-  SPA uses same-origin paths (no CORS config needed in dev; M20 reverse proxy
-  does the same in production).
+- **Backend stays authoritative (D2):** the dashboard renders the session + queue
+  snapshot exactly as the backend returns them; the only client persistence is
+  the host identity in localStorage (D39). Positions, statuses, and session state
+  all come from the API.
+- **One small backend addition:** `GET /api/v1/sessions` (owning host, newest
+  first) — required for the dashboard home and E11 re-sync. Naming follows D30
+  (`list_sessions`, never like a dependency).
+- **QR display:** `apiRequestText` fetches the SVG QR (D32) with the host bearer
+  token and renders it as a data URL — the `/qr` endpoint requires host auth, so
+  a plain `<img src>` could not be used.
+- **Playback actions disabled (D40):** skip/finish/pause/resume are rendered with
+  a "Arrives with playback (M11)" tooltip and call no endpoint; start/remove/
+  edit/end are fully wired.
+- **Polling (D38):** the dashboard polls the public snapshot every 5 s (5 s is a
+  placeholder for the M10 WebSocket channel). The session (host) fetch + QR fetch
+  happen once on load.
+- **Edit flow (E7):** inline URL editor per entry; on save it calls the M7
+  `PATCH /entries/{id}/video`; a rejected replacement shows the backend error and
+  keeps the old URL (the backend never replaced it).
 - **No test framework added:** the plan's testing choice is backend pytest; the
   frontend quality gates remain `npm run typecheck` / `build` / `lint` plus the
-  e2e smoke above. Adding vitest is not in scope.
+  e2e smoke above.
 
-## Tests added (M8)
+## Tests added (M9)
 
-- None (frontend). Backend suite unchanged: **158 passed**.
+- Backend: 5 tests for `GET /api/v1/sessions` (auth required, empty list, only
+  own sessions, `(created_at, id)` desc ordering, includes status/join_code).
+  Frontend: none (see above). Backend suite total: **163 passed**.
 
 ## Current blockers
 
@@ -102,8 +116,7 @@ docs/RUNBOOK.md                             (M8 checklist)
 
 ## Next recommended task
 
-**M9 — Host Dashboard** (frontend): the host's single control screen for the
-projector — current singer/song/playback status, full queue (names, titles,
-durations), and actions (start, skip, remove, edit, pause/resume, end session),
-using the host endpoints from M4/M7. See `plan.md` §M9 and `docs/PRODUCT_SPEC.md`
-§5.3-5.7 / §7.4.
+**M10 — Realtime updates** (backend + frontend): FastAPI WebSockets push typed
+domain events (QueueUpdated, SingerStarted, …, see plan.md §M10) to participant
+and host streams; clients resync from the REST API after reconnect (D5). Until
+then both the participant queue screen and the host dashboard poll every 5 s.

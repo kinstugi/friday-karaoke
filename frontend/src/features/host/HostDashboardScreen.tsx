@@ -1,0 +1,340 @@
+// Host dashboard (M9, PRODUCT_SPEC §5.3-5.7 / §7.4): the host's single control
+// screen for the projector — current singer/song, playback status, full queue
+// (names, titles, durations), QR + join code, and moderation actions
+// (start, remove, edit, end session) using the host endpoints from M4/M7.
+//
+// Playback-dependent actions (skip, finish, pause, resume) are rendered but
+// disabled: they require the M11 playback state machine and M14 endpoints,
+// which are not part of this milestone. The queue/session state is always
+// re-read from the backend; the screen only renders it (D2).
+import { useCallback, useEffect, useState } from 'react'
+import { Link, Navigate, useParams } from 'react-router-dom'
+
+import { fetchQueueSnapshot, removeEntry, editEntryVideo } from '../../api/entries'
+import { endSession, fetchSession, fetchSessionQr, startSession } from '../../api/host'
+import type { QueueEntry, QueueSnapshot, Session } from '../../api/types'
+import { formatDuration } from '../../lib/format'
+import { loadHostIdentity } from '../../lib/hostToken'
+import { statusLabel } from '../../lib/session'
+
+const POLL_INTERVAL_MS = 5000
+
+function entryStatusLabel(status: QueueEntry['status']): string {
+  switch (status) {
+    case 'WAITING':
+      return 'Waiting'
+    case 'NEXT':
+      return 'Next up'
+    case 'SINGING':
+      return 'Now singing'
+    case 'COMPLETED':
+      return 'Done'
+    case 'SKIPPED':
+      return 'Skipped'
+    case 'CANCELLED':
+      return 'Cancelled'
+    case 'REMOVED':
+      return 'Removed'
+  }
+}
+
+export default function HostDashboardScreen() {
+  const { sessionId = '' } = useParams()
+  const [identity] = useState(loadHostIdentity)
+
+  const [session, setSession] = useState<Session | null>(null)
+  const [snapshot, setSnapshot] = useState<QueueSnapshot | null>(null)
+  const [qrSvg, setQrSvg] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editUrl, setEditUrl] = useState('')
+
+  const refreshQueue = useCallback(async () => {
+    try {
+      setSnapshot(await fetchQueueSnapshot(sessionId))
+      setError(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not load the queue')
+    }
+  }, [sessionId])
+
+  const refreshSession = useCallback(async () => {
+    if (!identity) return
+    try {
+      setSession(await fetchSession(identity.token, sessionId))
+      setError(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not load the session')
+    }
+  }, [identity, sessionId])
+
+  useEffect(() => {
+    if (!identity) return
+    void refreshSession()
+    fetchSessionQr(identity.token, sessionId)
+      .then(setQrSvg)
+      .catch(() => setQrSvg(null))
+  }, [identity, sessionId, refreshSession])
+
+  useEffect(() => {
+    void refreshQueue()
+    const timer = setInterval(() => void refreshQueue(), POLL_INTERVAL_MS)
+    return () => clearInterval(timer)
+  }, [refreshQueue])
+
+  if (!identity) {
+    return <Navigate to="/host/login" replace />
+  }
+
+  async function handleStart() {
+    if (!identity || busy) return
+    setBusy('start')
+    setError(null)
+    try {
+      await startSession(identity.token, sessionId)
+      await refreshSession()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not start the session')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function handleEnd() {
+    if (!identity || busy) return
+    if (!window.confirm('End this karaoke session for good?')) return
+    setBusy('end')
+    setError(null)
+    try {
+      await endSession(identity.token, sessionId)
+      await refreshSession()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not end the session')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function handleRemove(entry: QueueEntry) {
+    if (!identity || busy) return
+    setBusy(`remove:${entry.id}`)
+    setError(null)
+    try {
+      await removeEntry(entry.id, identity.token)
+      await refreshQueue()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not remove the entry')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  function beginEdit(entry: QueueEntry) {
+    setEditingId(entry.id)
+    setEditUrl(entry.youtube_url)
+    setError(null)
+  }
+
+  async function handleEditSave(entry: QueueEntry) {
+    if (!identity || busy) return
+    if (editUrl.trim() === '') return
+    setBusy(`edit:${entry.id}`)
+    setError(null)
+    try {
+      await editEntryVideo(entry.id, identity.token, editUrl.trim())
+      setEditingId(null)
+      await refreshQueue()
+    } catch (err) {
+      // E7: invalid replacement is rejected; the old URL is kept.
+      setError(err instanceof Error ? err.message : 'Could not update the song')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  if (!session) {
+    return (
+      <div className="screen">
+        <p className="muted">{error ?? 'Loading session…'}</p>
+      </div>
+    )
+  }
+
+  const ended = session.status === 'ENDED'
+  const nowSinging = snapshot?.queue.find((e) => e.status === 'SINGING') ?? null
+  const upNext =
+    snapshot?.queue.find(
+      (e) => e.id !== nowSinging?.id && e.status !== 'SINGING',
+    ) ?? null
+
+  return (
+    <div className="host-dashboard">
+      <header className="host-header">
+        <div className="host-title">
+          <h1>{session.name}</h1>
+          <p className={`badge badge-${session.status.toLowerCase()}`}>
+            {statusLabel(session.status)}
+          </p>
+        </div>
+        <div className="host-join">
+          {qrSvg ? (
+            <img
+              src={`data:image/svg+xml;utf8,${encodeURIComponent(qrSvg)}`}
+              alt="Join QR code"
+              className="qr"
+            />
+          ) : null}
+          <div className="host-join-text">
+            <span className="label">Join code</span>
+            <strong className="join-code">{session.join_code}</strong>
+            <span className="muted join-url">{session.join_url}</span>
+          </div>
+        </div>
+      </header>
+
+      {ended ? (
+        <div className="card host-ended">
+          <h2>This session has ended.</h2>
+          <Link to="/host">
+            <button>Back to dashboard</button>
+          </Link>
+        </div>
+      ) : (
+        <>
+          <section className="host-main">
+            <div className="host-now">
+              <div className="card highlight">
+                <p className="label">Now singing</p>
+                {nowSinging ? (
+                  <>
+                    <h2>{nowSinging.title}</h2>
+                    <p className="muted">
+                      {nowSinging.participant_name} &middot;{' '}
+                      {formatDuration(nowSinging.duration_seconds)}
+                    </p>
+                  </>
+                ) : (
+                  <p className="muted">Nobody yet — waiting for the queue.</p>
+                )}
+              </div>
+              <div className="card">
+                <p className="label">Up next</p>
+                {upNext ? (
+                  <>
+                    <h3>{upNext.title}</h3>
+                    <p className="muted">
+                      {upNext.participant_name} &middot;{' '}
+                      {formatDuration(upNext.duration_seconds)}
+                    </p>
+                  </>
+                ) : (
+                  <p className="muted">Queue is empty.</p>
+                )}
+              </div>
+              <div className="card">
+                <p className="label">Playback</p>
+                <p className="muted">
+                  Automatic playback starts with a future milestone; the host
+                  keeps manual control.
+                </p>
+              </div>
+            </div>
+
+            <div className="host-actions">
+              {session.status === 'CREATED' ? (
+                <button onClick={() => void handleStart()} disabled={busy !== null}>
+                  {busy === 'start' ? 'Starting…' : 'Start session'}
+                </button>
+              ) : null}
+              <button className="ghost" disabled title="Arrives with playback (M11)">
+                Skip
+              </button>
+              <button className="ghost" disabled title="Arrives with playback (M11)">
+                Finish
+              </button>
+              <button className="ghost" disabled title="Arrives with playback (M11)">
+                Pause
+              </button>
+              <button className="ghost" disabled title="Arrives with playback (M11)">
+                Resume
+              </button>
+              <button className="danger" onClick={() => void handleEnd()} disabled={busy !== null}>
+                {busy === 'end' ? 'Ending…' : 'End session'}
+              </button>
+            </div>
+          </section>
+
+          <section className="host-queue">
+            <h2>Queue</h2>
+            {snapshot === null ? (
+              <p className="muted">Loading queue…</p>
+            ) : snapshot.queue.length === 0 ? (
+              <p className="muted">No songs yet — waiting for singers.</p>
+            ) : (
+              <ol className="queue-list">
+                {snapshot.queue.map((entry) => {
+                  const editing = editingId === entry.id
+                  return (
+                    <li key={entry.id}>
+                      <span className="position">{entry.position ?? '—'}</span>
+                      <div className="entry-main">
+                        <strong>{entry.title}</strong>
+                        <span className="muted">
+                          {entry.participant_name} &middot;{' '}
+                          {formatDuration(entry.duration_seconds)} &middot;{' '}
+                          {entryStatusLabel(entry.status)}
+                        </span>
+                        {editing ? (
+                          <div className="stack host-edit">
+                            <input
+                              type="url"
+                              value={editUrl}
+                              onChange={(e) => setEditUrl(e.target.value)}
+                              placeholder="New YouTube URL"
+                              required
+                            />
+                            <div className="row">
+                              <button
+                                onClick={() => void handleEditSave(entry)}
+                                disabled={busy !== null || editUrl.trim() === ''}
+                              >
+                                {busy === `edit:${entry.id}` ? 'Saving…' : 'Save'}
+                              </button>
+                              <button className="ghost" onClick={() => setEditingId(null)}>
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                      {!editing ? (
+                        <div className="row entry-actions">
+                          <button
+                            className="ghost"
+                            onClick={() => beginEdit(entry)}
+                            disabled={busy !== null}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            className="danger"
+                            onClick={() => void handleRemove(entry)}
+                            disabled={busy !== null}
+                          >
+                            {busy === `remove:${entry.id}` ? 'Removing…' : 'Remove'}
+                          </button>
+                        </div>
+                      ) : null}
+                    </li>
+                  )
+                })}
+              </ol>
+            )}
+            {error ? <p className="error-text">{error}</p> : null}
+          </section>
+        </>
+      )}
+    </div>
+  )
+}

@@ -5,6 +5,7 @@ are scoped to the session's owning host (decision D29). Base path confirmed at
 M3 (D26): business endpoints live under ``/api/v1``.
 
 - ``POST /api/v1/sessions``           create a session (host)
+- ``GET  /api/v1/sessions``           list the host's sessions, newest first (M9)
 - ``GET  /api/v1/sessions/{id}``      get a session (owning host)
 - ``POST /api/v1/sessions/{id}/start`` start a session (owning host)
 - ``POST /api/v1/sessions/{id}/end``  end a session (owning host)
@@ -63,6 +64,20 @@ async def create_session(
     """Create a karaoke session owned by the authenticated host."""
     karaoke = await session_service.create(session, current_host.id, payload.name)
     return _session_to_response(karaoke)
+
+
+@router.get("", response_model=list[SessionResponse])
+async def list_sessions(
+    current_host: Annotated[Host, Depends(get_current_host)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> list[SessionResponse]:
+    """Return the authenticated host's sessions, newest first (M9 dashboard home).
+
+    NOTE: named ``list_sessions`` (not ``get_sessions``) on purpose — see D30
+    (endpoint functions must not share a ``__name__`` with a dependency).
+    """
+    karaoke_sessions = await session_service.list_for_host(session, current_host.id)
+    return [_session_to_response(karaoke) for karaoke in karaoke_sessions]
 
 
 @router.get("/{session_id}", response_model=SessionResponse)

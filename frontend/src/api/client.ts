@@ -50,3 +50,34 @@ export async function apiRequest<T>(
   }
   return (await response.json()) as T
 }
+
+/** Fetch a non-JSON response body (e.g. the QR SVG) as text. */
+export async function apiRequestText(
+  path: string,
+  options: RequestOptions = {},
+): Promise<string> {
+  const { method = 'GET', body, token } = options
+
+  const headers: Record<string, string> = {}
+  if (body !== undefined) headers['Content-Type'] = 'application/json'
+  if (token) headers['Authorization'] = `Bearer ${token}`
+
+  const response = await fetch(path, {
+    method,
+    headers,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  })
+
+  if (!response.ok) {
+    let message = `request failed (${response.status})`
+    try {
+      const data = (await response.json()) as { detail?: unknown }
+      if (typeof data.detail === 'string') message = data.detail
+    } catch {
+      // Non-JSON error body: keep the fallback message.
+    }
+    throw new ApiError(response.status, message)
+  }
+
+  return response.text()
+}

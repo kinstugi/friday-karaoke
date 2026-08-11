@@ -164,6 +164,73 @@ def test_join_url_is_derived_from_base_url(client: TestClient) -> None:
     assert body["join_url"] == f"{base_url}/join/{body['join_code']}"
 
 
+# --- List sessions (M9 dashboard home) ------------------------------------------
+
+
+def test_list_sessions_requires_authentication(client: TestClient) -> None:
+    response = client.get(SESSIONS_URL)
+    assert response.status_code == 401
+
+
+def test_list_sessions_empty_for_new_host(client: TestClient) -> None:
+    headers = _auth_headers(client)
+    response = client.get(SESSIONS_URL, headers=headers)
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_list_sessions_returns_only_own_sessions(client: TestClient) -> None:
+    headers_a = _auth_headers(client, email=EMAIL)
+    _create_session(client, headers_a)
+    _create_session(client, headers_a)
+
+    # A second host must not see the first host's sessions.
+    headers_b = _auth_headers(client, email=OTHER_EMAIL)
+    theirs = _create_session(client, headers_b)
+
+    response = client.get(SESSIONS_URL, headers=headers_a)
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 2
+    assert all(s["id"] != theirs["id"] for s in body)
+
+    response_b = client.get(SESSIONS_URL, headers=headers_b)
+    assert [s["id"] for s in response_b.json()] == [theirs["id"]]
+
+
+def test_list_sessions_newest_first_by_created_at(client: TestClient) -> None:
+    """Ordering is ``(created_at, id)`` descending (D36-style stable tie-break).
+
+    ``sessions.created_at`` is a server ``now()`` default, so on SQLite two
+    sessions created in the same second tie and the ``id`` UUID is the
+    deterministic tie-break — assert the sort rule, not a fixed order.
+    """
+    headers = _auth_headers(client)
+    first = _create_session(client, headers)
+    second = _create_session(client, headers)
+
+    response = client.get(SESSIONS_URL, headers=headers)
+    body = response.json()
+    assert {s["id"] for s in body} == {first["id"], second["id"]}
+    created_asc = sorted(body, key=lambda s: (s["created_at"], s["id"]))
+    assert [s["id"] for s in body] == [created_asc[1]["id"], created_asc[0]["id"]]
+
+
+def test_list_sessions_includes_status_and_join_code(client: TestClient) -> None:
+    headers = _auth_headers(client)
+    created = _create_session(client, headers)
+    client.post(f"{SESSIONS_URL}/{created['id']}/start", headers=headers)
+
+    response = client.get(SESSIONS_URL, headers=headers)
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["id"] == created["id"]
+    assert body[0]["status"] == SessionStatus.ACTIVE.value
+    assert body[0]["join_code"] == created["join_code"]
+    assert body[0]["join_url"] == created["join_url"]
+
+
 # --- Get session -------------------------------------------------------------
 
 

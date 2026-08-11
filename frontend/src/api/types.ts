@@ -74,3 +74,28 @@ export interface SongSubmitResult {
   duplicate: boolean
   notice: string | null
 }
+
+// --- Host-facing types (M9 dashboard) ---
+
+export interface HostProfile {
+  id: string
+  email: string
+  created_at: string
+}
+
+export interface HostLoginResult {
+  token: string
+  token_type: 'bearer'
+  host: HostProfile
+}
+
+export interface Session {
+  id: string
+  name: string
+  join_code: string
+  join_url: string
+  status: SessionStatus
+  created_at: string
+  started_at: string | null
+  ended_at: string | null
+}

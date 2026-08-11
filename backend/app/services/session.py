@@ -122,6 +122,23 @@ class SessionService:
             raise SessionNotFoundError(session_id)
         return karaoke
 
+    async def list_for_host(
+        self, session: AsyncSession, host_id: uuid.UUID
+    ) -> list[Session]:
+        """Return the host's sessions, newest first.
+
+        Used by the host dashboard home screen (M9): the host logs in, sees
+        their sessions, and picks one to run (E11 re-sync after reopening the
+        dashboard). Ordering is ``created_at`` desc, ``id`` desc for a stable
+        deterministic sort (ties are vanishingly rare and arbitrary).
+        """
+        result = await session.scalars(
+            select(Session)
+            .where(Session.host_id == host_id)
+            .order_by(Session.created_at.desc(), Session.id.desc())
+        )
+        return list(result)
+
     async def start(
         self, session: AsyncSession, host_id: uuid.UUID, session_id: uuid.UUID
     ) -> Session:

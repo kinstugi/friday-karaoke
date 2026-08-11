@@ -100,7 +100,7 @@ Implementation status at M6:
   (M7: submit with limit + duplicate notice, snapshots with computed positions,
   cancel/remove, host URL editing).
 - **API:** health at root; host auth under `/api/v1/auth/host` (M3); sessions
-  under `/api/v1/sessions` (create/get/start/end + SVG QR, M4/M5); public join
+  under `/api/v1/sessions` (create/get/**list (M9)**/start/end + SVG QR, M4/M5); public join
   under `/api/v1/join` (M5); song endpoints under `/api/v1/sessions/{id}/entries`
   (preview M6, submit + snapshot M7) and `/api/v1/entries` (cancel/remove, host
   edit, M7). `get_current_host`, `get_current_participant`, and
@@ -126,32 +126,35 @@ Implemented at M8 (participant queue UI); the host dashboard lands at M9:
 ```text
 frontend/
     src/
-        api/       # typed API client (client.ts, types.ts, session.ts, entries.ts)
+        api/       # typed API client (client.ts, types.ts, session.ts, entries.ts, host.ts)
         ws/        # typed WebSocket client (M10)
         features/
             join/       # QR join flow (JoinScreen)
             submit/     # song submission (SubmitSongScreen)
             queue/      # participant queue view (QueueScreen)
-            host/       # host dashboard + playback (M9)
+            host/       # host dashboard (HostAuthScreen, HostHomeScreen, HostDashboardScreen)
         app/       # routing, providers
         components/
-        lib/       # shared utilities (token persistence, formatting)
+        lib/       # shared utilities (token/hostToken persistence, formatting, session labels)
     public/        # manifest, icons, service worker
 ```
 
-Frontend rules (all in effect at M8):
+Frontend rules (all in effect at M8/M9):
 
 - Never store authoritative state; treat API responses as the source of truth.
-  The only client-side persistence is the participant identity (token/session) in
-  localStorage (D38/E8); queue state is never stored or merged client-side.
+  The only client-side persistence is the participant identity (token/session)
+  and the host identity (token/email) in localStorage (D38/D39/E8); queue state
+  is never stored or merged client-side.
 - Reuse API types/schemas generated from backend Pydantic contracts where
   possible — `src/api/types.ts` mirrors the backend schemas by hand and the API
   client (`src/api/client.ts`) is a typed fetch wrapper.
-- Mobile-first participant UI (large touch targets ≥ 44px); host dashboard is
-  designed for a projector/TV (M9).
+- Mobile-first participant UI (large touch targets ≥ 44px); the host dashboard
+  is designed for a projector/TV (large text, high contrast, minimal scrolling
+  for current/next) (M9).
 - Standard PWA (manifest + service worker) planned for M19.
 - Realtime is a delivery mechanism only (D5); until the WebSocket channel lands
-  in M10 the queue screen polls the authoritative snapshot every 5 s (D38).
+  in M10 the queue screen and host dashboard poll the authoritative snapshot
+  every 5 s (D38).
 
 ## 5. Data flow (target state)
 
@@ -208,7 +211,9 @@ get correct state from the API.
   positions, participant cancel, host remove/edit.
 - **M8** — participant queue UI (complete, frontend): join/submit/queue screens,
   typed API client, localStorage identity, snapshot polling.
-- **M9** — host dashboard (frontend, next).
+- **M9** — host dashboard (complete, frontend): host auth + home (session list,
+  create) + dashboard (now/next cards, full queue, QR/join code, start/remove/
+  edit/end actions; skip/finish/pause/resume rendered disabled until M11).
 - **M10–M16** — realtime + playback + rounds + notifications.
 - **M17–M19** — security, testing, PWA/mobile UX.
 - **M20–M22** — deployment, pilot, fixes.

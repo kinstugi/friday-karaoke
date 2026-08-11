@@ -6,26 +6,12 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link, Navigate, useParams } from 'react-router-dom'
 
 import { cancelEntry, fetchQueueSnapshot } from '../../api/entries'
-import type { QueueEntry, QueueSnapshot, SessionStatus } from '../../api/types'
+import type { QueueEntry, QueueSnapshot } from '../../api/types'
 import { formatDuration } from '../../lib/format'
+import { statusLabel } from '../../lib/session'
 import { loadIdentity } from '../../lib/token'
 
 const POLL_INTERVAL_MS = 5000
-
-function statusLabel(status: SessionStatus): string {
-  switch (status) {
-    case 'CREATED':
-      return 'Waiting to start'
-    case 'ACTIVE':
-      return 'Live'
-    case 'PAUSED':
-      return 'Paused'
-    case 'ROUND_COMPLETE':
-      return 'Round complete'
-    case 'ENDED':
-      return 'Ended'
-  }
-}
 
 export default function QueueScreen() {
   const { joinCode = '' } = useParams()

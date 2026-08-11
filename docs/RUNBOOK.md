@@ -99,7 +99,7 @@ first (`uv run uvicorn app.main:app --reload` from `backend/`) and open
 `http://localhost:5173/join/<join-code>`. The join code comes from creating a
 session via the host API (see the verification checklist below).
 
-## Verification checklist (M7)
+## Verification checklist (M7–M9)
 
 ```bash
 # From the repo root
@@ -146,10 +146,13 @@ curl -X PATCH http://localhost:8000/api/v1/entries/$ENTRY_ID/video \
 curl -X DELETE http://localhost:8000/api/v1/entries/$ENTRY_ID \
   -H "Authorization: Bearer $TOKEN"                                      # 204 (host remove)
 
-# Frontend (M8: participant queue UI)
+# Frontend (M9: host dashboard)
 cd ../frontend && npm install && npm run build && npm run typecheck && npm run lint
-# Manual: with the backend running, open http://localhost:5173/join/<join-code>
-# on a phone-sized window -> join with a nickname -> add a song -> watch the queue.
+# Manual: with the backend running, open http://localhost:5173/host
+#   -> sign in / create an account
+#   -> create a session (or reopen an existing one from the list)
+#   -> the dashboard shows the QR + join code + full queue; start/end the
+#      session and remove/edit entries. Scan the QR with a phone to join.
 ```
 
 This satisfies the M7 acceptance criteria: multiple participants submit and the
@@ -157,8 +160,11 @@ public snapshot returns the queue in deterministic submission order with
 computed positions. The active-entry limit (2), duplicate-song notice, participant
 cancel of own WAITING entries, and host remove/edit are enforced server-side.
 The M8 participant screens (join/submit/queue) render exactly these backend
-responses; the frontend never owns queue state. Health, host auth, sessions,
-join, and preview endpoints from M2-M6 are unchanged.
+responses; the M9 host dashboard (auth, home, dashboard) renders the session and
+queue state and drives the host actions (start/remove/edit/end) through the same
+backend. Skip/finish/pause/resume are visible but disabled until the M11 playback
+state machine lands. Health, host auth, sessions, join, and preview endpoints
+from M2-M6 are unchanged.
 
 ## Branch / commit workflow
 

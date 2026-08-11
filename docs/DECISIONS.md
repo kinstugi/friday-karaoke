@@ -508,6 +508,46 @@ These freeze MVP product behavior. They were captured in `docs/PRODUCT_SPEC.md`.
 
 ---
 
+## M9 host-dashboard decisions
+
+## D39. Host dashboard: session list endpoint + host identity in localStorage
+
+- **Status:** Accepted
+- **Decision:** (1) A new `GET /api/v1/sessions` endpoint returns the
+  authenticated host's sessions, newest first (`SessionService.list_for_host`,
+  ordered `(created_at, id)` desc — a D36-style stable tie-break, since
+  `sessions.created_at` is a second-precision server default). (2) The host's
+  identity (bearer token, email, host id) is persisted in `localStorage` under
+  one key (mirroring D38), so reopening the dashboard resumes the session list
+  without re-logging in (E11).
+- **Rationale:** (1) The M9 home screen needs to show the host's sessions and let
+  the host re-sync after reopening the dashboard (E11); without a list endpoint
+  the host would have to remember a UUID. The endpoint reuses the existing
+  `get_for_host` ownership model — no cross-host leakage. (2) Same rationale as
+  D38: the bearer token is the secret, localStorage is the standard SPA
+  placement, and the backend remains authoritative for all state.
+- **Rejected:** Storing the session list in localStorage (goes stale; violates
+  D2); a paginated/admin-style session list (unnecessary — a host has a handful
+  of sessions).
+
+## D40. M9 playback-status actions are not wired to the backend
+
+- **Status:** Accepted
+- **Decision:** The M9 host dashboard renders the host action bar (start, skip,
+  finish, pause, resume, end session) but only **start**, **remove**, **edit**,
+  and **end session** call backend endpoints. Skip / finish / pause / resume are
+  rendered disabled with an explanatory tooltip: they require the M11 playback
+  state machine and its endpoints, which are not part of M9.
+- **Rationale:** The plan (plan.md §M9) lists those actions on the dashboard, but
+  the backend has no playback endpoints yet (M11/M14). Silently omitting them
+  would under-deliver the documented control surface; wiring them to
+  non-existent endpoints would be broken. Disabled controls keep the surface
+  honest and visible.
+- **Rejected:** Implementing fake playback endpoints in M9 (scope creep into
+  M11/M14); hiding the actions entirely (the plan documents them).
+
+---
+
 ## Open questions (tracked)
 
 - ~~Authentication mechanism for hosts (email/password vs. school SSO)~~ — **M3

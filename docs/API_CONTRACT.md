@@ -104,6 +104,7 @@ bcrypt-hashed. Emails are stored lowercase (case-insensitive uniqueness).
 | Method | Path                       | Auth | Description                    |
 | ------ | -------------------------- | ---- | ------------------------------ |
 | POST   | /api/v1/sessions           | host | Create session                |
+| GET    | /api/v1/sessions           | host | List own sessions, newest first (M9) |
 | GET    | /api/v1/sessions/{id}      | host | Get session (owning host)     |
 | POST   | /api/v1/sessions/{id}/start| host | Start session (owning host)   |
 | POST   | /api/v1/sessions/{id}/end  | host | End session (owning host)     |
@@ -122,6 +123,15 @@ Accessing a session that does not exist *or belongs to another host* returns
 `404 session not found` (no existence leak, decision D29).
 
 ```text
+GET /api/v1/sessions                Authorization: Bearer <token>    # M9 dashboard home
+200 [
+  { "id": "...", "name": "Friday Karaoke - 2026-08-14", "join_code": "K7X3QP",
+    "join_url": "http://localhost:5173/join/K7X3QP", "status": "ACTIVE",
+    "created_at": "...", "started_at": "...", "ended_at": null },
+  ...                                 # newest first (created_at, id) desc
+]
+401 { "detail": "authentication required" }
+
 POST /api/v1/sessions                  Authorization: Bearer <token>
 { }                                    # name optional; defaults below
 # or { "name": "Spring Concert Night" }

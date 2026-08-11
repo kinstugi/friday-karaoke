@@ -165,11 +165,21 @@ limit, sessions not tied to a browser) are in `docs/PRODUCT_SPEC.md` §8–§9 a
 
 ## 8. Current milestone
 
-**M9 — Host Dashboard** (next, frontend). M8 is complete; see
+**M10 — Realtime updates** (next; backend + frontend). M9 is complete; see
 `docs/DEV_BRAIN.md` for live status.
 
 ## 9. Completed milestones
 
+- **M9 — Host Dashboard** (complete, frontend + one backend endpoint): the host's
+  projector/TV control screen — `HostAuthScreen` (login/register, M3),
+  `HostHomeScreen` (create session + list own sessions), and
+  `HostDashboardScreen` (now/next cards, full queue with names/titles/durations,
+  QR + join code, start/remove/edit/end actions; skip/finish/pause/resume
+  rendered disabled until M11). Host identity persisted in localStorage (D39);
+  dashboard polls the queue snapshot every 5 s (D38) until M10 websockets. New
+  backend `GET /api/v1/sessions` (list own sessions, newest first) powers the
+  home screen and E11 re-sync. Decisions D39–D40 recorded in
+  `docs/DECISIONS.md`.
 - **M8 — Participant Queue UI** (complete, first frontend milestone): mobile-first
   participant screens — join by nickname (`/join/:code`), song submit with
   preview→confirm (`/join/:code/submit`), and a polled queue screen
@@ -234,11 +244,13 @@ limit, sessions not tied to a browser) are in `docs/PRODUCT_SPEC.md` §8–§9 a
 
 ## 10. Known limitations
 
-- No host dashboard or playback yet (M9/M11/M12); queue entries stay WAITING —
-  NEXT/SINGING statuses exist but are not yet assigned. Rounds are created but
-  the round lifecycle (enrollment, next round) lands in M16.
-- Participant UI polls the snapshot (M8); realtime WebSocket delivery lands in
-  M10.
+- No playback yet (M11/M12); queue entries stay WAITING — NEXT/SINGING statuses
+  exist but are not yet assigned. Rounds are created but the round lifecycle
+  (enrollment, next round) lands in M16.
+- The host dashboard's skip/finish/pause/resume buttons are disabled until the
+  M11 playback state machine and its endpoints exist (D40).
+- Participant and host UIs poll the snapshot (M8/M9, D38); realtime WebSocket
+  delivery lands in M10.
 - Only the Host/HostAuthToken/Session/Participant/YouTubeVideo/Round/QueueEntry
   tables exist (migration `0005`). PAUSED and ROUND_COMPLETE session states are
   defined but not reachable yet (M14/M16).
@@ -292,6 +304,10 @@ See `docs/DECISIONS.md` for the full, maintained list. Highlights:
   (participant cancel vs host remove) (D37).
 - Participant UI (M8): the frontend is a thin renderer — typed API client, identity
   in localStorage, snapshot polling until M10 websockets (D38).
+- Host dashboard (M9): host identity in localStorage, a `GET /api/v1/sessions`
+  list endpoint for the dashboard home / E11 re-sync, and the dashboard's action
+  bar wired only to existing M4/M7 endpoints — playback actions stay disabled
+  until M11 (D39, D40).
 - No user-visible feature in M0 beyond a health check.
 
 ## 12. Commands for running / testing
