@@ -165,11 +165,19 @@ limit, sessions not tied to a browser) are in `docs/PRODUCT_SPEC.md` §8–§9 a
 
 ## 8. Current milestone
 
-**M5 — Public QR Join Flow** (next). M4 is complete; see `docs/DEV_BRAIN.md`
-for live status.
+**M6 — YouTube URL Submission + Metadata** (next). M5 is complete; see
+`docs/DEV_BRAIN.md` for live status.
 
 ## 9. Completed milestones
 
+- **M5 — Public QR Join Flow** (complete): public session lookup by join code
+  (`GET /api/v1/join/{code}`, case-insensitive) and participant registration
+  (`POST /api/v1/join/{code}/participants`) — no account, nickname rules
+  B14/D16 (trimmed, 1-20 chars, case-insensitive uniqueness per session), opaque
+  participant tokens stored as SHA-256 digests (D31), ended-session guard, and a
+  server-side SVG QR endpoint `GET /api/v1/sessions/{id}/qr` encoding the join
+  URL (D32). `Participant` table (migration `0004_participants`); `segno` added
+  for QR generation. Decisions D31–D32 in `docs/DECISIONS.md`.
 - **M4 — Karaoke Session Creation** (complete): host-owned sessions with
   create/get/start/end under `/api/v1/sessions` (auth via `get_current_host`,
   cross-host access → 404), the `SessionStatus` domain state machine
@@ -204,10 +212,12 @@ for live status.
 
 ## 10. Known limitations
 
-- No participant-side functionality yet (join flow, queue, playback land from M5).
-- Only the `Host`, `HostAuthToken`, and `Session` domain tables exist (migration
-  `0003`). PAUSED and ROUND_COMPLETE session states are defined but not reachable
-  yet (M14/M16).
+- No song submission or queue yet (YouTube metadata M6, queue M7).
+- Only the `Host`, `HostAuthToken`, `Session`, and `Participant` domain tables
+  exist (migration `0004`). PAUSED and ROUND_COMPLETE session states are defined
+  but not reachable yet (M14/M16).
+- Participant tokens are issued at join but only start authorizing participant
+  endpoints from M6 (preview) / M7 (queue).
 - Host bearer tokens are long-lived (30 days) unless logged out; fine for the
   pilot, token rotation/refresh is not in scope for v1.
 - Browser autoplay policies will require host interaction before audio playback
@@ -242,6 +252,9 @@ See `docs/DECISIONS.md` for the full, maintained list. Highlights:
   `KARAOKE_PUBLIC_BASE_URL` and never stored (D28), cross-host access returns 404
   and state transitions are strict server-side (D29), FastAPI 0.141.1
   dependency-name collision workaround (D30).
+- Public join (M5): participants are session-scoped identities with opaque tokens
+  hashed at rest and case-insensitive per-session nickname uniqueness (D31); QR
+  codes are generated server-side as SVG encoding the join URL (D32).
 - No user-visible feature in M0 beyond a health check.
 
 ## 12. Commands for running / testing

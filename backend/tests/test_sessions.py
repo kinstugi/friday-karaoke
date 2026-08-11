@@ -296,3 +296,48 @@ def test_end_session_already_ended_conflicts(client: TestClient) -> None:
 
     response = client.post(f"{SESSIONS_URL}/{created['id']}/end", headers=headers)
     assert response.status_code == 409
+
+
+# --- QR code (M5) -------------------------------------------------------------
+
+
+def test_qr_requires_authentication(client: TestClient) -> None:
+    response = client.get(f"{SESSIONS_URL}/{uuid.uuid4()}/qr")
+    assert response.status_code == 401
+
+
+def test_qr_returns_svg_for_owner(client: TestClient) -> None:
+    import io
+
+    import segno
+
+    headers = _auth_headers(client)
+    created = _create_session(client, headers)
+
+    response = client.get(f"{SESSIONS_URL}/{created['id']}/qr", headers=headers)
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/svg+xml"
+
+    # A QR SVG is a module matrix (no embedded text), so verify the exact
+    # matrix by re-rendering the expected join URL with the same parameters.
+    base_url = get_settings().public_base_url
+    expected_url = f"{base_url}/join/{created['join_code']}"
+    qr = segno.make(expected_url, error="m")
+    buffer = io.BytesIO()
+    qr.save(buffer, kind="svg", scale=4)
+    assert response.content == buffer.getvalue()
+
+
+def test_qr_another_host_is_not_found(client: TestClient) -> None:
+    headers_a = _auth_headers(client, email=EMAIL)
+    created = _create_session(client, headers_a)
+    headers_b = _auth_headers(client, email=OTHER_EMAIL)
+
+    response = client.get(f"{SESSIONS_URL}/{created['id']}/qr", headers=headers_b)
+    assert response.status_code == 404
+
+
+def test_qr_unknown_session_is_not_found(client: TestClient) -> None:
+    headers = _auth_headers(client)
+    response = client.get(f"{SESSIONS_URL}/{uuid.uuid4()}/qr", headers=headers)
+    assert response.status_code == 404

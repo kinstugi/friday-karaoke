@@ -8,12 +8,15 @@ M3 (D26): business endpoints live under ``/api/v1``.
 - ``GET  /api/v1/sessions/{id}``      get a session (owning host)
 - ``POST /api/v1/sessions/{id}/start`` start a session (owning host)
 - ``POST /api/v1/sessions/{id}/end``  end a session (owning host)
+- ``GET  /api/v1/sessions/{id}/qr``   QR code of the join URL (owning host, M5)
 """
 
+import io
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+import segno
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_current_host
@@ -113,6 +116,29 @@ async def end_session(
     except InvalidSessionTransitionError as exc:
         raise _conflict(str(exc)) from exc
     return _session_to_response(karaoke)
+
+
+@router.get("/{session_id}/qr")
+async def session_qr(
+    session_id: uuid.UUID,
+    current_host: Annotated[Host, Depends(get_current_host)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> Response:
+    """Return an SVG QR code of the session's join URL (decision D32).
+
+    The QR encodes the public join URL (``{KARAOKE_PUBLIC_BASE_URL}/join/{code}``)
+    which is what a student's phone opens; the join screen then uses
+    ``GET /api/v1/join/{code}`` (M5). Display is the host dashboard's job (M9).
+    """
+    try:
+        karaoke = await session_service.get_for_host(session, current_host.id, session_id)
+    except SessionNotFoundError as exc:
+        raise _not_found() from exc
+
+    qr = segno.make(_join_url(karaoke.join_code), error="m")
+    buffer = io.BytesIO()
+    qr.save(buffer, kind="svg", scale=4)
+    return Response(content=buffer.getvalue(), media_type="image/svg+xml")
 
 
 def _not_found() -> HTTPException:

@@ -7,106 +7,106 @@ of every milestone. The persistent context lives in `PROJECT_BRAIN.md`.
 
 ## Current milestone
 
-**M4 — Karaoke Session Creation** — COMPLETE (verified).
+**M5 — Public QR Join Flow** — COMPLETE (verified).
 
 ## Current task
 
-None (milestone finished). Next milestone: **M5 — Public QR Join Flow**.
+None (milestone finished). Next milestone: **M6 — YouTube URL Submission + Metadata**.
 
-## M4 scope (plan.md §M4)
+## M5 scope (plan.md §M5)
 
-- Host creates a karaoke session (`Friday Karaoke - <date>` default name).
-- Session fields: `id`, `hostId`, `name`, `joinCode`, `status`, `createdAt`,
-  `startedAt`, `endedAt`.
-- `SessionStatus` enum: CREATED / ACTIVE / PAUSED / ROUND_COMPLETE / ENDED.
-- Create / get / start / end session APIs (host-owned, `get_current_host`).
-- Unique join-code generation; join URL derived from `KARAOKE_PUBLIC_BASE_URL`.
+- Public session lookup by join code (no auth).
+- Participant registration by nickname (no account).
+- Anonymous participant identity + secure opaque participant token.
+- QR code generation/display (generation server-side; display is M9).
 
-## Verification results (M4 acceptance criteria, plan.md §M4)
+## Verification results (M5 acceptance criteria, plan.md §M5)
 
 | Acceptance criterion | Result |
 | -------------------- | ------ |
-| Host can create "Friday Karaoke - 2026-08-14" | Verified — `POST /api/v1/sessions` with no name returns `Friday Karaoke - <server local date>`; custom names are trimmed and used (`test_create_session_defaults_name`, `test_create_session_uses_custom_name`). |
-| Host receives a join URL/code | Verified — response includes a 6-char unambiguous `join_code` (unique across sessions) and `join_url = {KARAOKE_PUBLIC_BASE_URL}/join/{join_code}` (`test_join_codes_are_unique`, `test_join_url_is_derived_from_base_url`). |
+| A student scans the QR code and reaches the correct session | Verified end-to-end: the QR endpoint (`GET /api/v1/sessions/{id}/qr`) returns an SVG encoding the session's join URL (byte-verified against a re-rendered segno reference, `test_qr_returns_svg_for_owner`); scanning that URL leads to `GET /api/v1/join/{code}`, which returns the correct session snapshot, and `POST /api/v1/join/{code}/participants` registers the student by nickname (`test_lookup_returns_public_snapshot`, `test_register_returns_token_session_and_participant`). |
 
 Extra verification performed:
 
-- Full state machine: start `CREATED -> ACTIVE` stamps `started_at`; double start →
-  409; start after end → 409; end from any non-terminal state stamps `ended_at`;
-  double end → 409 (`app/domain/session.py` + endpoint tests).
-- Ownership: a second host gets `404 session not found` for the first host's
-  session on get/start/end (no existence leak, D29).
-- `alembic check` reports "No new upgrade operations detected" — migration
-  `0003_sessions` exactly matches the ORM models; upgrade → downgrade → upgrade
-  verified on SQLite.
-- `uv run pytest`: 64 passed (29 new session/state-machine tests). `uv run
-  pyright`: 0 errors, 0 warnings.
-- Health + host-auth endpoints unchanged and still green.
+- Join lookup is public (200 without any token) and case-insensitive
+  (`test_lookup_requires_no_authentication`, `test_lookup_is_case_insensitive`).
+- Nickname rules B14/D16: trimmed, 1-20 chars, case-insensitive uniqueness per
+  session; duplicates → 409, blank/overlong → 422, display case preserved,
+  normalized copy stored (`test_register_*`).
+- Ended sessions: lookup still returns the snapshot (status ENDED) so the UI can
+  show "this karaoke night has ended"; registration is rejected with 409
+  (`test_lookup_ended_session_still_returns_snapshot`,
+  `test_register_ended_session_conflicts`).
+- Token hygiene: participant token is opaque, stored only as SHA-256 digest
+  (`test_register_token_is_stored_hashed`).
+- `alembic check`: no drift; migration `0004_participants` upgrade →
+  downgrade → upgrade verified on SQLite.
+- `uv run pytest`: 85 passed (21 new: 17 join + 4 QR). `uv run pyright`:
+  0 errors, 0 warnings.
+- Health, host auth, and session endpoints unchanged and still green.
 
-## Files changed (M4)
+## Files changed (M5)
 
 ```text
-backend/app/domain/session.py              (new — SessionStatus enum + transitions)
-backend/app/models/session.py              (new — Session ORM model)
-backend/app/models/__init__.py             (+ Session)
-backend/app/schemas/session.py             (new — SessionCreateRequest, SessionResponse)
-backend/app/services/session.py            (new — SessionService: create/get/start/end, join code)
-backend/app/api/routes/sessions.py         (new — /api/v1/sessions router)
-backend/app/main.py                        (include sessions router)
-backend/alembic/versions/0003_sessions.py  (new — sessions table)
-backend/app/core/config.py                 (+ public_base_url)
-backend/.env.example                       (+ KARAOKE_PUBLIC_BASE_URL)
-backend/tests/test_sessions.py             (new — 29 tests: 24 endpoint + 5 unit)
-backend/tests/test_config.py               (pin KARAOKE_PUBLIC_BASE_URL default)
-docs/API_CONTRACT.md                       (§3 sessions implemented)
-docs/DECISIONS.md                          (D27 join code, D28 join URL, D29 ownership, D30 FastAPI bug)
-docs/ARCHITECTURE.md                       (§3 implementation status, §7 phases)
-docs/PROJECT_BRAIN.md                      (milestones, limitations, decisions)
-docs/DEV_BRAIN.md                          (updated, this file)
-docs/RUNBOOK.md                            (M4 checklist + session smoke test)
+backend/pyproject.toml                (deps: segno for QR generation)
+backend/uv.lock                       (updated)
+backend/app/models/participant.py     (new — Participant ORM model)
+backend/app/models/__init__.py        (+ Participant)
+backend/app/schemas/participant.py    (new — join/participant schemas)
+backend/app/services/participant.py   (new — ParticipantService: lookup + register)
+backend/app/api/routes/join.py        (new — /api/v1/join router)
+backend/app/api/routes/sessions.py    (+ GET /{id}/qr SVG QR endpoint)
+backend/app/main.py                   (include join router)
+backend/alembic/versions/0004_participants.py (new — participants table)
+backend/tests/test_join.py            (new — 17 join-flow tests)
+backend/tests/test_sessions.py        (+ 4 QR tests)
+docs/API_CONTRACT.md                  (§3 QR endpoint; §4 public join implemented)
+docs/DECISIONS.md                     (D31 participant identity, D32 server-side QR)
+docs/ARCHITECTURE.md                  (§3 implementation status, §7 phases)
+docs/PROJECT_BRAIN.md                 (milestones, limitations, decisions)
+docs/DEV_BRAIN.md                     (updated, this file)
+docs/RUNBOOK.md                       (M5 checklist + join smoke test)
 ```
 
-## Implementation notes (M4)
+## Implementation notes (M5)
 
-- **Domain state machine first:** `app/domain/session.py` defines `SessionStatus`
-  (all five documented states) and `can_transition_to` mirroring PRODUCT_SPEC §3.
-  The service applies these rules before mutating; the API maps violations to 409.
-  The `domain/` package placeholder is now real for sessions.
-- **Join codes (D27):** 6 uppercase chars from an unambiguous alphabet
-  (`ABCDEFGHJKLMNPQRSTUVWXYZ23456789` — no 0/O/1/I), unique index on
-  `sessions.join_code`, pre-checked at generation with a bounded retry (10).
-- **Join URL (D28):** derived, never stored — `{KARAOKE_PUBLIC_BASE_URL}/join/{code}`.
-  New setting `KARAOKE_PUBLIC_BASE_URL` (default `http://localhost:5173`).
-- **Ownership (D29):** every session query filters by `host_id`; unknown *or*
-  foreign sessions raise `SessionNotFoundError` → 404. Started/ended timestamps are
-  UTC-aware (`datetime.now(timezone.utc)`); `created_at` uses `server_default
-  func.now()` like the M3 models.
-- **Status column:** non-native `sa.Enum(SessionStatus, native_enum=False)` →
-  VARCHAR(32) with a server default `'CREATED'`, keeping the schema portable
-  across SQLite tests and PostgreSQL (D22).
-- **Repositories:** still a placeholder. The service talks to the database session
-  directly, consistent with M3's `HostAuthService`; a repository layer is deferred
-  until persistence is shared between services.
-- **FastAPI 0.141.1 bug (D30):** the GET endpoint was initially named
-  `get_session`, which collides with the `get_session` dependency by `__name__`.
-  On literal-suffix routes (`POST /{id}/start`, `/end`) FastAPI then invoked the
-  *endpoint* instead of the dependency and injected a constructed response model
-  (500). Root-caused with a minimal repro; fixed by naming the endpoint
-  `session_detail`. Rule going forward: **endpoint functions must never share a
-  `__name__` with a dependency function.**
+- **Public by design:** the join endpoints carry no auth dependency. Anyone with
+  the join code can look up a session and register (B2/D6); the QR encodes the
+  public join URL so this surface is intentional.
+- **Participant identity (D31):** `participants` stores `nickname` (display case
+  preserved) + `nickname_lower` (lowercased) with a `(session_id,
+  nickname_lower)` unique constraint for portable case-insensitive uniqueness.
+  The opaque token reuses the M3 helpers (`generate_auth_token` /
+  `hash_auth_token` from `app.core.security`) and is stored as a SHA-256 digest.
+- **Nickname validation:** Pydantic enforces 1-20 on raw input; the service then
+  trims and re-checks (blank-after-trim → 422). Duplicate (case-insensitive,
+  including a lost unique-constraint race) → 409.
+- **Ended sessions (E18):** `GET /join/{code}` returns the snapshot with
+  `status: ENDED` (the join screen renders the "ended" message); registration
+  raises `SessionEndedError` → 409.
+- **QR (D32):** `GET /api/v1/sessions/{id}/qr` (owning host only) renders the
+  join URL as an SVG via `segno` (`error="m"`, `scale=4`), deterministic output.
+  Display on the projector is the host dashboard's job (M9).
+- **Join code lookup:** normalized with `.strip().upper()` — D27 codes are
+  uppercase from an unambiguous alphabet, so typed lowercase still works.
+- **Repositories:** still a placeholder; services use the database session
+  directly (consistent with M3/M4).
+- **FastAPI D30 rule respected:** new endpoints are named `lookup_session`,
+  `register_participant`, `session_qr` — none collide with the `get_session` /
+  `get_current_host` dependency names.
 
-## Tests added (M4)
+## Tests added (M5)
 
-- `tests/test_sessions.py` — 29 tests: session create (auth required, default
-  name, custom name, overlong name 422, owner persisted, unique join codes, join
-  URL derivation), get (auth, owned, another host 404, missing 404, bad UUID 422),
-  start (auth, CREATED→ACTIVE + `started_at`, another host 404, double start 409,
-  start-after-end 409), end (auth, active→ENDED + `ended_at`, created→ENDED,
-  another host 404, double end 409), plus 5 `SessionStatus` state-machine unit
-  tests (`test_created_can_start_and_end`, `test_created_cannot_skip_to_paused_or_round_complete`,
-  `test_ended_is_terminal`, `test_end_allowed_from_every_non_terminal_state`,
-  `test_start_only_allowed_from_created_and_active_neighbors`).
-- **64 passed** total (was 35 at M3).
+- `tests/test_join.py` — 17 tests: public lookup (no auth, snapshot shape,
+  unknown code 404, case-insensitive, ended session still returned), registration
+  (no auth, token+session+participant shape, unknown code 404, ended 409, blank
+  nickname 422, overlong nickname 422, case-insensitive duplicate 409, same
+  nickname in different sessions OK, trim), persistence/hygiene (row persisted
+  with normalized nickname, token stored hashed, participant belongs to session).
+- `tests/test_sessions.py` — 4 QR tests: auth required (401), SVG matches a
+  re-rendered segno reference of the join URL, another host 404, unknown session
+  404.
+- **85 passed** total (was 64 at M4).
 
 ## Current blockers
 
@@ -123,8 +123,8 @@ docs/RUNBOOK.md                            (M4 checklist + session smoke test)
 
 ## Next recommended task
 
-**M5 — Public QR Join Flow** — public session lookup by join code
-(`GET /join/{joinCode}`), participant registration with nickname + opaque
-participant token, and QR generation/display. The join URL built in M4
-(`{public_base_url}/join/{code}`) is the exact surface M5 implements. See
-`plan.md` §M5 and `docs/PRODUCT_SPEC.md` §5.2/§6.
+**M6 — YouTube URL Submission + Metadata** — public preview endpoint that
+validates a YouTube URL (watch + youtu.be), extracts the video ID, and returns
+metadata (title, channel, duration, thumbnail) with a warning for unusually long
+videos (never auto-reject). The participant token from M5 authorizes it. See
+`plan.md` §M6 and `docs/PRODUCT_SPEC.md` §6.3-6.4 / §8 E3-E4.

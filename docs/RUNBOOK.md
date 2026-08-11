@@ -94,7 +94,7 @@ npm run typecheck
 npm run lint
 ```
 
-## Verification checklist (M4)
+## Verification checklist (M5)
 
 ```bash
 # From the repo root
@@ -114,32 +114,32 @@ curl -X POST http://localhost:8000/api/v1/auth/host/login \
   -d '{"email":"host@school.edu","password":"correct-horse-battery"}'
 #   -> 200 {"token": "...", "token_type": "bearer", "host": {...}}
 TOKEN=<token from the login response>
-curl http://localhost:8000/api/v1/auth/host/me -H "Authorization: Bearer $TOKEN"  # 200
-curl http://localhost:8000/api/v1/auth/host/me                                   # 401
 
-# Session smoke test (real PostgreSQL)
+# Session + join smoke test (real PostgreSQL)
 curl -X POST http://localhost:8000/api/v1/sessions \
   -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' -d '{}'
-#   -> 201 {"id": "...", "name": "Friday Karaoke - 2026-08-11", "join_code": "K7X3QP",
-#           "join_url": "http://localhost:5173/join/K7X3QP", "status": "CREATED", ...}
+#   -> 201 {"id": "...", "join_code": "K7X3QP", "join_url": "http://localhost:5173/join/K7X3QP", ...}
 SESSION_ID=<id from the create response>
-curl http://localhost:8000/api/v1/sessions/$SESSION_ID -H "Authorization: Bearer $TOKEN"        # 200
-curl -X POST http://localhost:8000/api/v1/sessions/$SESSION_ID/start -H "Authorization: Bearer $TOKEN"  # 200, status ACTIVE
-curl -X POST http://localhost:8000/api/v1/sessions/$SESSION_ID/start -H "Authorization: Bearer $TOKEN"  # 409 (already active)
-curl -X POST http://localhost:8000/api/v1/sessions/$SESSION_ID/end -H "Authorization: Bearer $TOKEN"    # 200, status ENDED
-curl -X POST http://localhost:8000/api/v1/sessions -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{}'
-#   -> 201; try GET with no token -> 401; with a second host's token -> 404
+JOIN_CODE=<join_code from the create response>
+curl http://localhost:8000/api/v1/sessions/$SESSION_ID/qr -H "Authorization: Bearer $TOKEN" -o /tmp/join-qr.svg   # SVG QR of the join URL
+curl http://localhost:8000/api/v1/join/$JOIN_CODE                     # 200 session snapshot (no auth)
+curl -X POST http://localhost:8000/api/v1/join/$JOIN_CODE/participants \
+  -H 'Content-Type: application/json' -d '{"nickname":"Emma"}'        # 201 token + session + participant
+curl -X POST http://localhost:8000/api/v1/join/$JOIN_CODE/participants \
+  -H 'Content-Type: application/json' -d '{"nickname":"emma"}'        # 409 already taken
+curl http://localhost:8000/api/v1/join/ZZZZZZ                         # 404
 
-# Frontend (unchanged by M4)
+# Frontend (unchanged by M5)
 cd ../frontend && npm install && npm run build && npm run typecheck
 ```
 
-This satisfies the M4 acceptance criteria: a host creates a session
-(`Friday Karaoke - <date>` default name) and receives a join code and join URL
-(the QR flow itself is M5). Session state transitions are server-enforced
-(start `CREATED -> ACTIVE`, end `-> ENDED`), cross-host access returns 404, and
-invalid transitions return 409. Health + host auth from M2/M3 are unchanged.
+This satisfies the M5 acceptance criteria: a student scans the QR (SVG generated
+by the backend, encoding the join URL), reaches the session via the public join
+endpoint, and registers a nickname without an account, receiving an opaque
+participant token. Nickname rules (trimmed, 1-20 chars, case-insensitive
+uniqueness) and the ended-session guard are enforced server-side. Health, host
+auth, and session endpoints from M2/M3/M4 are unchanged.
 
 ## Branch / commit workflow
 

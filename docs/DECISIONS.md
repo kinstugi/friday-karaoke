@@ -356,6 +356,45 @@ These freeze MVP product behavior. They were captured in `docs/PRODUCT_SPEC.md`.
 
 ---
 
+## M5 public-join-flow decisions
+
+## D31. Participant identity: opaque token (hashed) + normalized nickname
+
+- **Status:** Accepted
+- **Decision:** Joining creates a session-scoped `participants` row: display
+  `nickname` (case preserved) plus a lowercased `nickname_lower` column that
+  feeds a `(session_id, nickname_lower)` unique constraint (portable
+  case-insensitive uniqueness, B14/D16). The participant's opaque bearer token is
+  returned once and stored only as a SHA-256 digest (`token_hash`), reusing the
+  M3 token helpers.
+- **Rationale:** Participants are anonymous identities, not accounts (D6), so
+  there is no login — the token is issued at join time and authorizes later
+  participant endpoints (M6+). Hashing the token at rest mirrors D25 (a DB leak
+  exposes nothing usable). Normalizing a copy of the nickname keeps display case
+  while enforcing case-insensitive uniqueness on both SQLite and PostgreSQL
+  without dialect-specific `COLLATE`/`CITEXT` features.
+- **Rejected:** Storing the raw participant token (usable on leak); case-sensitive
+  nickname uniqueness (allows "Emma" and "emma" to coexist, violating B14);
+  dialect-specific case-insensitive columns (breaks the SQLite test suite).
+
+## D32. QR codes are generated server-side as SVG
+
+- **Status:** Accepted
+- **Decision:** The backend exposes `GET /api/v1/sessions/{id}/qr` (owning host
+  only, D29) returning an SVG QR code (via the pure-Python `segno` library) that
+  encodes the session's join URL (`{KARAOKE_PUBLIC_BASE_URL}/join/{code}`, D28).
+  The host dashboard (M9) renders this image on the projector; the QR never
+  changes for the session's lifetime (PRODUCT_SPEC §3).
+- **Rationale:** The plan's M5 "QR generation/display" task is split: generation
+  is a deterministic backend capability (testable in M5), display is the frontend
+  dashboard's job (M9). SVG scales crisply on a projector and needs no image
+  encoding dependency (unlike PNG, which would require Pillow/pypng).
+- **Rejected:** Client-side QR generation (duplicates logic across the stack,
+  untestable in the backend suite); PNG (extra dependency, no projector benefit
+  over SVG).
+
+---
+
 ## Open questions (tracked)
 
 - ~~Authentication mechanism for hosts (email/password vs. school SSO)~~ — **M3

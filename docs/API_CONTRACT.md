@@ -107,6 +107,7 @@ bcrypt-hashed. Emails are stored lowercase (case-insensitive uniqueness).
 | GET    | /api/v1/sessions/{id}      | host | Get session (owning host)     |
 | POST   | /api/v1/sessions/{id}/start| host | Start session (owning host)   |
 | POST   | /api/v1/sessions/{id}/end  | host | End session (owning host)     |
+| GET    | /api/v1/sessions/{id}/qr   | host | Join URL as SVG QR code (M5)  |
 
 Session creation returns `id`, `name`, `joinCode`, a QR-friendly `joinUrl`, and
 `status`. Session state is a `SessionStatus` enum:
@@ -156,17 +157,51 @@ POST /api/v1/sessions/{id}/end         Authorization: Bearer <token>
 
 Notes: only the owning host can get/start/end a session (decision D29). The join
 URL is derived from the join code and `KARAOKE_PUBLIC_BASE_URL`; it is never
-stored. QR generation and the `/join/{code}` lookup land in M5.
+stored. QR generation (SVG encoding of the join URL) is served at
+`GET /api/v1/sessions/{id}/qr` (decision D32); the `/join/{code}` lookup lands in
+M5.
 
-## 4. Public join (M5)
+## 4. Public join (M5) — IMPLEMENTED
 
-| Method | Path                          | Auth | Description                        |
-| ------ | ----------------------------- | ---- | ---------------------------------- |
-| GET    | /join/{joinCode}              | none | Look up session by join code       |
-| POST   | /join/{joinCode}/participants | none | Register participant + nickname    |
+| Method | Path                                 | Auth | Description                        |
+| ------ | ------------------------------------ | ---- | ---------------------------------- |
+| GET    | /api/v1/join/{joinCode}              | none | Look up session by join code       |
+| POST   | /api/v1/join/{joinCode}/participants | none | Register participant + nickname    |
 
-Participant registration returns an opaque participant token and the session
-snapshot. No participant account exists.
+These endpoints are **public** (no bearer token): anyone with the join code can
+look up a session and join (rule B2). Participant registration returns an opaque
+participant token and the session snapshot. No participant account exists
+(decision D6).
+
+```text
+GET /api/v1/join/{joinCode}              # joinCode is case-insensitive
+200 {
+  "id": "d4c7a99f-...",
+  "name": "Friday Karaoke - 2026-08-14",
+  "status": "CREATED"                    # ENDED is still returned so the UI
+}                                        # can show "This karaoke night has ended"
+404 { "detail": "session not found" }
+
+POST /api/v1/join/{joinCode}/participants
+{ "nickname": "Emma" }                   # required, trimmed, 1-20 chars, unique per session
+
+201 {
+  "token": "fr5zCS4nGntz3pAGYIMlfyG0vK-5mWuHeS8xXud8_V4",   # opaque, shown once
+  "token_type": "bearer",
+  "session": { "id": "...", "name": "...", "status": "CREATED" },
+  "participant": { "id": "...", "session_id": "...", "nickname": "Emma",
+                   "created_at": "..." }
+}
+404 { "detail": "session not found" }
+409 { "detail": "this karaoke night has ended" }      # ENDED sessions cannot be joined
+409 { "detail": "nickname 'emma' is already taken" }  # case-insensitive per session
+422 { "detail": [...] }                                # blank/overlong nickname
+```
+
+Notes: the nickname rules are B14/D16 (trimmed, 1-20 chars, case-insensitive
+uniqueness per session, decision D31). The participant token is hashed at rest
+(SHA-256 digest). The QR code (M5, decision D32) encodes the session's join URL
+and is served as an SVG at `GET /api/v1/sessions/{id}/qr` (owning host).
 
 ## 5. Songs / queue (M6, M7)
 

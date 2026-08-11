@@ -58,20 +58,20 @@ placeholders; `services/` gained its first real use-case at M3 — host auth;
 ```text
 backend/
     app/
-        api/          # HTTP + WebSocket endpoints/routers (health M2, auth M3, sessions M4)
+        api/          # HTTP + WebSocket endpoints/routers (health M2, auth M3, sessions M4, join M5)
         core/         # config (Pydantic Settings), structured logging, database, security
         domain/       # domain models, enums, business rules, state machines (SessionStatus M4)
-        services/     # application use-cases / orchestration (host auth M3, sessions M4)
+        services/     # application use-cases / orchestration (host auth M3, sessions M4, join M5)
         repositories/ # persistence access (SQLAlchemy) (deferred until M4+ shared)
-        models/       # SQLAlchemy ORM models (Base, Host, HostAuthToken, Session)
-        schemas/      # Pydantic API schemas (health M2; auth M3; sessions M4)
+        models/       # SQLAlchemy ORM models (Base, Host, HostAuthToken, Session, Participant)
+        schemas/      # Pydantic API schemas (health M2; auth M3; sessions M4; join M5)
         main.py       # FastAPI app factory / entry point
     tests/            # pytest suite (self-contained: in-memory SQLite)
-    alembic/          # migrations (async env; 0001 initial, 0002 host auth, 0003 sessions)
+    alembic/          # migrations (async env; 0001..0004)
     alembic.ini
 ```
 
-Implementation status at M4:
+Implementation status at M5:
 
 - **Configuration:** Pydantic Settings (`app/core/config.py`), env prefix
   `KARAOKE_`, `.env` file support, cached singleton via `get_settings()`. Auth
@@ -80,27 +80,28 @@ Implementation status at M4:
   M4) used to derive session join URLs.
 - **Database:** async SQLAlchemy engine + session factory + `get_session`
   dependency (`app/core/database.py`); PostgreSQL via `asyncpg`, in-memory SQLite
-  for tests. Models: `Host`, `HostAuthToken` (M3), `Session` (M4, UUID PKs via
-  `sqlalchemy.Uuid`, dialect-safe on both PostgreSQL and SQLite).
+  for tests. Models: `Host`, `HostAuthToken` (M3), `Session` (M4), `Participant`
+  (M5, UUID PKs via `sqlalchemy.Uuid`, dialect-safe on both PostgreSQL and
+  SQLite).
 - **Security:** bcrypt password hashing, opaque bearer token generation, SHA-256
-  token digesting (`app/core/security.py`).
+  token digesting (`app/core/security.py`) — shared by host tokens (M3) and
+  participant tokens (M5).
 - **Domain:** `SessionStatus` enum + transition rules (`app/domain/session.py`,
   M4) mirroring the documented lifecycle
   `CREATED -> ACTIVE <-> PAUSED -> ROUND_COMPLETE -> ENDED`; `ENDED` is terminal
   and reachable from any other state.
-- **Services:** `HostAuthService` (`app/services/host_auth.py`) — register, login,
-  logout, token-based host lookup (M3). `SessionService`
-  (`app/services/session.py`) — create (unique join code), get-for-host (ownership
-  enforced), start/end (state machine enforced) (M4).
-- **API:** health endpoints unchanged; host auth under `/api/v1/auth/host`
-  (M3); sessions under `/api/v1/sessions` (create/get/start/end, M4).
-  `get_current_host` dependency (`app/api/dependencies.py`) enforces
-  `Authorization: Bearer <token>` on host endpoints; session ownership is
-  enforced in the service (cross-host → 404, D29). Business endpoints use the
-  `/api/v1` base path (D26); health stays at the root.
+- **Services:** `HostAuthService` (M3), `SessionService` (M4: create/get/start/
+  end, unique join codes), `ParticipantService` (M5: public session lookup by
+  join code, participant registration with nickname rules + opaque token).
+- **API:** health at root; host auth under `/api/v1/auth/host` (M3); sessions
+  under `/api/v1/sessions` (create/get/start/end + SVG QR of the join URL, M4/M5);
+  public join under `/api/v1/join` (lookup + register participant, M5).
+  `get_current_host` dependency enforces `Authorization: Bearer <token>` on host
+  endpoints; session ownership is enforced in the service (cross-host → 404, D29).
+  Business endpoints use the `/api/v1` base path (D26); health stays at the root.
 - **Migrations:** Alembic async env wired to application settings; revisions
-  `0001_initial`, `0002_host_auth` (hosts + host_auth_tokens), `0003_sessions`
-  (sessions). `alembic check` reports no drift.
+  `0001_initial`, `0002_host_auth`, `0003_sessions`, `0004_participants`.
+  `alembic check` reports no drift.
 
 Rules:
 
@@ -179,7 +180,10 @@ get correct state from the API.
 - **M4** — karaoke session creation (complete): host-owned sessions
   (create/get/start/end), `SessionStatus` domain state machine, unique join codes,
   derived join URLs, `Session` table.
-- **M5–M9** — vertical slice: join flow, YouTube metadata, queue,
+- **M5** — public QR join flow (complete): public session lookup by join code,
+  participant registration (nickname + opaque token), server-side SVG QR of the
+  join URL, `Participant` table.
+- **M6–M9** — vertical slice: YouTube metadata, queue,
   participant UI, host dashboard.
 - **M10–M16** — realtime + playback + rounds + notifications.
 - **M17–M19** — security, testing, PWA/mobile UX.
