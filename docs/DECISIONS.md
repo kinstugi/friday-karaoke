@@ -432,6 +432,61 @@ These freeze MVP product behavior. They were captured in `docs/PRODUCT_SPEC.md`.
 
 ---
 
+## M7 queue-engine decisions
+
+## D35. Rounds exist from session creation; queue entries are round-scoped
+
+- **Status:** Accepted
+- **Decision:** A `rounds` table exists with a unique `(session_id, number)`
+  constraint. Round 1 is created in the same transaction as the session
+  (SessionService.create). Every `QueueEntry` carries `round_id` and the active
+  queue/positions/limits are scoped to the session's latest round.
+- **Rationale:** The domain model (D10) and PRODUCT_SPEC §6.5 ("creates the queue
+  entry in the active round") require entries to live in a round, and the
+  active-entry limit (B15/D17) is per-round. Creating round 1 eagerly keeps the
+  FK invariant (`round_id` is never null) and makes M16's "start next round"
+  just insert round N+1.
+- **Rejected:** Omitting rounds until M16 (would leave `round_id` nullable or
+  drop the documented field); auto-creating round 1 lazily on first submit
+  (asymmetric — a session with no submissions has no round).
+
+## D36. Deterministic queue ordering: microsecond `created_at` + `id` tie-break
+
+- **Status:** Accepted
+- **Decision:** Queue order is `ORDER BY created_at, id`. `created_at` is
+  assigned in Python (`datetime.now(timezone.utc)`, microsecond precision) rather
+  than by the database default.
+- **Rationale:** SQLite's `CURRENT_TIMESTAMP` is second-precision, so two
+  submissions in the same second tie and a random-UUID tie-break scrambles
+  insertion order (caught by the M7 ordering test). A microsecond Python
+  timestamp preserves insertion order on SQLite tests and PostgreSQL alike;
+  `id` remains as a deterministic (if arbitrary) tie-break for the vanishingly
+  rare same-instant case (E19 requires determinism, not client-clock order).
+- **Rejected:** Relying on `server_default now()` (ties on SQLite); an integer
+  autoincrement PK (deviates from the UUID-keyed domain model); a per-session
+  counter (concurrency-racy without a sequence).
+
+## D37. YouTubeVideo is a shared metadata row; DELETE /entries/{id} is dual-actor
+
+- **Status:** Accepted
+- **Decision:** (1) `youtube_videos` holds one immutable metadata row per unique
+  video id (unique index on `youtube_video_id`); duplicate-song submissions and
+  host URL edits find-or-create it (race-safe via the unique constraint), so
+  duplicate songs share the metadata snapshot. (2) `DELETE /api/v1/entries/{id}`
+  accepts either a participant or a host token (a `get_host_or_participant`
+  dependency): participants cancel their own WAITING entry (→ `CANCELLED`, 409
+  otherwise), hosts remove any entry (→ `REMOVED`).
+- **Rationale:** (1) Matches "A QueueEntry references exactly one YouTubeVideo"
+  while keeping metadata storage normalized (B16 allows duplicates — they share
+  the row). (2) The API contract defines a single path for both actions; the
+  actor type cleanly disambiguates the behavior without leaking existence
+  (foreign entries/sessions → 404).
+- **Rejected:** A `youtube_videos` row per queue entry (duplicate storage, no
+  unique-key benefit); two endpoints for cancel vs remove (breaks the documented
+  contract).
+
+---
+
 ## Open questions (tracked)
 
 - ~~Authentication mechanism for hosts (email/password vs. school SSO)~~ — **M3

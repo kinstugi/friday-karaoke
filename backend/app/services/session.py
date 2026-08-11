@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.session import SessionStatus
+from app.models.round import Round
 from app.models.session import Session
 
 #: Join-code alphabet: uppercase and unambiguous (no 0/O, 1/I).
@@ -75,7 +76,7 @@ class SessionService:
     async def create(
         self, session: AsyncSession, host_id: uuid.UUID, name: str | None
     ) -> Session:
-        """Create a session in ``CREATED`` state and return it."""
+        """Create a session in ``CREATED`` state with round 1, and return it."""
         karaoke = Session(
             host_id=host_id,
             name=_normalize_session_name(name),
@@ -83,6 +84,8 @@ class SessionService:
             status=SessionStatus.CREATED,
         )
         session.add(karaoke)
+        await session.flush()  # populate karaoke.id for the round FK
+        session.add(Round(session_id=karaoke.id, number=1))
         await session.commit()
         await session.refresh(karaoke)
         return karaoke

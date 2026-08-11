@@ -61,10 +61,10 @@ backend/
         api/          # HTTP + WebSocket endpoints/routers (health M2, auth M3, sessions M4, join M5, entries M6)
         core/         # config (Pydantic Settings), structured logging, database, security
         domain/       # domain models, enums, business rules, state machines (SessionStatus M4)
-        services/     # use-cases (host auth M3, sessions M4, join M5, youtube metadata M6)
+        services/     # use-cases (host auth M3, sessions M4, join M5, youtube M6, queue M7)
         repositories/ # persistence access (SQLAlchemy) (deferred until shared)
-        models/       # SQLAlchemy ORM models (Base, Host, HostAuthToken, Session, Participant)
-        schemas/      # Pydantic API schemas (health M2; auth M3; sessions M4; join M5; youtube M6)
+        models/       # SQLAlchemy ORM models (Host, Session, Participant, YouTubeVideo, Round, QueueEntry)
+        schemas/      # Pydantic API schemas (health M2; auth M3; sessions M4; join M5; youtube M6; queue M7)
         main.py       # FastAPI app factory / entry point
     tests/            # pytest suite (self-contained: in-memory SQLite)
     alembic/          # migrations (async env; 0001..0004)
@@ -82,8 +82,10 @@ Implementation status at M6:
 - **Database:** async SQLAlchemy engine + session factory + `get_session`
   dependency (`app/core/database.py`); PostgreSQL via `asyncpg`, in-memory SQLite
   for tests. Models: `Host`, `HostAuthToken` (M3), `Session` (M4), `Participant`
-  (M5, UUID PKs via `sqlalchemy.Uuid`, dialect-safe on both PostgreSQL and
-  SQLite).
+  (M5), `YouTubeVideo`, `Round`, `QueueEntry` (M7, UUID PKs via
+  `sqlalchemy.Uuid`, dialect-safe on both PostgreSQL and SQLite). Queue
+  `created_at` uses a microsecond Python default so SQLite ordering is
+  deterministic (D36).
 - **Security:** bcrypt password hashing, opaque bearer token generation, SHA-256
   token digesting (`app/core/security.py`) — shared by host tokens (M3) and
   participant tokens (M5).
@@ -92,19 +94,21 @@ Implementation status at M6:
   `CREATED -> ACTIVE <-> PAUSED -> ROUND_COMPLETE -> ENDED`; `ENDED` is terminal
   and reachable from any other state.
 - **Services:** `HostAuthService` (M3), `SessionService` (M4: create/get/start/
-  end, unique join codes), `ParticipantService` (M5: public session lookup,
-  participant registration, token lookup), `YouTubeService` (M6: Data API v3
-  metadata fetch, URL validation, duration parsing).
+  end, unique join codes, creates round 1), `ParticipantService` (M5: public
+  session lookup, participant registration, token lookup), `YouTubeService` (M6:
+  Data API v3 metadata fetch, URL validation, duration parsing), `QueueService`
+  (M7: submit with limit + duplicate notice, snapshots with computed positions,
+  cancel/remove, host URL editing).
 - **API:** health at root; host auth under `/api/v1/auth/host` (M3); sessions
   under `/api/v1/sessions` (create/get/start/end + SVG QR, M4/M5); public join
-  under `/api/v1/join` (M5); participant preview under
-  `/api/v1/sessions/{id}/entries/preview` (M6). `get_current_host` and
-  `get_current_participant` dependencies enforce bearer tokens; ownership/session
+  under `/api/v1/join` (M5); song endpoints under `/api/v1/sessions/{id}/entries`
+  (preview M6, submit + snapshot M7) and `/api/v1/entries` (cancel/remove, host
+  edit, M7). `get_current_host`, `get_current_participant`, and
+  `get_host_or_participant` dependencies enforce bearer tokens; ownership/session
   binding is enforced in services/endpoints (cross-owner → 404, D29). Business
   endpoints use the `/api/v1` base path (D26); health stays at the root.
 - **Migrations:** Alembic async env wired to application settings; revisions
-  `0001_initial`, `0002_host_auth`, `0003_sessions`, `0004_participants`.
-  `alembic check` reports no drift.
+  `0001_initial` … `0005_queue`. `alembic check` reports no drift.
 
 Rules:
 
@@ -189,8 +193,10 @@ get correct state from the API.
 - **M6** — YouTube URL submission + metadata (complete): preview endpoint with
   URL validation, YouTube Data API v3 metadata fetch, configurable long-video
   warnings.
-- **M7–M9** — vertical slice: queue engine,
-  participant UI, host dashboard.
+- **M7** — queue management (complete): authoritative queue engine
+  (`QueueEntry`/`YouTubeVideo`/`Round` tables), submit + snapshot with computed
+  positions, participant cancel, host remove/edit.
+- **M8–M9** — participant queue UI, host dashboard (frontend).
 - **M10–M16** — realtime + playback + rounds + notifications.
 - **M17–M19** — security, testing, PWA/mobile UX.
 - **M20–M22** — deployment, pilot, fixes.

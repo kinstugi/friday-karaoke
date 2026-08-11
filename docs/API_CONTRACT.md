@@ -203,16 +203,70 @@ uniqueness per session, decision D31). The participant token is hashed at rest
 (SHA-256 digest). The QR code (M5, decision D32) encodes the session's join URL
 and is served as an SVG at `GET /api/v1/sessions/{id}/qr` (owning host).
 
-## 5. Songs / queue (M6, M7)
+## 5. Songs / queue (M6, M7) — IMPLEMENTED
 
 | Method | Path                                     | Auth        | Description                              |
 | ------ | ---------------------------------------- | ----------- | ---------------------------------------- |
-| POST   | /api/v1/sessions/{id}/entries/preview    | participant | Validate URL + return metadata preview (M6 — IMPLEMENTED) |
-| POST   | /api/v1/sessions/{id}/entries            | participant | Submit song (create queue entry) (M7)    |
+| POST   | /api/v1/sessions/{id}/entries/preview    | participant | Validate URL + return metadata preview (M6) |
+| POST   | /api/v1/sessions/{id}/entries            | participant | Submit song (create WAITING entry) (M7)  |
 | GET    | /api/v1/sessions/{id}/entries            | none        | Queue snapshot (public, sanitized) (M7)  |
-| DELETE | /entries/{entryId}                       | participant | Cancel own WAITING entry (M7)            |
-| PATCH  | /entries/{entryId}/video                 | host        | Host replaces the YouTube URL (M7)       |
-| DELETE | /entries/{entryId}                       | host        | Host removes any entry (M7)              |
+| DELETE | /api/v1/entries/{entryId}                | participant *or* host | Cancel own WAITING / host remove (M7) |
+| PATCH  | /api/v1/entries/{entryId}/video          | host        | Host replaces the YouTube URL (M7)       |
+
+### Submit (M7)
+
+```text
+POST /api/v1/sessions/{id}/entries            Authorization: Bearer <participant token>
+{ "youtube_url": "https://youtu.be/dQw4w9WgXcQ" }
+
+201 {
+  "entry": { "id": "...", "participant_name": "Alice", "status": "WAITING",
+             "video_id": "dQw4w9WgXcQ", "youtube_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+             "title": "Never Gonna Give You Up", "channel": "Rick Astley",
+             "duration_seconds": 213, "thumbnail_url": "...", "position": 1,
+             "created_at": "..." },
+  "duplicate": false,                    # true when the same video is already queued (B16)
+  "notice": null                         # "This song is already in the queue." when duplicate
+}
+401 / 404 (wrong session) / 409 (ended session, or active-entry limit B15) / 422 (bad URL)
+404 { "detail": "we couldn't load this video" }   # E4
+```
+
+### Queue snapshot (M7)
+
+```text
+GET /api/v1/sessions/{id}/entries                # public, no auth
+200 {
+  "session_id": "...",
+  "status": "CREATED",
+  "queue": [ { ...QueueEntryResponse as above, "position": 1 }, ... ]   # creation order, D8
+}
+404 { "detail": "session not found" }
+```
+
+Positions are computed from the authoritative creation order (D8); there is no
+mutable position field. The snapshot is sanitized (no host identity, no
+participant tokens).
+
+### Cancel / remove / edit (M7)
+
+```text
+DELETE /api/v1/entries/{entryId}   Authorization: Bearer <participant token>
+204                                 # own WAITING entry -> CANCELLED (B3)
+409 { "detail": "only WAITING entries can be cancelled, not SINGING" }
+
+DELETE /api/v1/entries/{entryId}   Authorization: Bearer <host token>
+204                                 # any entry in a session you own -> REMOVED (B4)
+
+PATCH /api/v1/entries/{entryId}/video   Authorization: Bearer <host token>
+{ "youtube_url": "https://youtu.be/9bZkp7q19f0" }
+200 { ...QueueEntryResponse... }     # position + participant preserved (E7)
+422 { "detail": "that doesn't look like a valid YouTube link" }   # old URL kept
+```
+
+Cross-actor semantics: the same DELETE path means "cancel own entry" for a
+participant and "remove any entry" for a host (decision D37); unknown entries or
+entries outside the actor's reach return 404 (no existence leak).
 
 ### Preview (M6) — IMPLEMENTED
 

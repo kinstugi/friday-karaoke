@@ -7,103 +7,104 @@ of every milestone. The persistent context lives in `PROJECT_BRAIN.md`.
 
 ## Current milestone
 
-**M6 — YouTube URL Submission + Metadata** — COMPLETE (verified).
+**M7 — Queue Management** — COMPLETE (verified).
 
 ## Current task
 
-None (milestone finished). Next milestone: **M7 — Queue Management**.
+None (milestone finished). Next milestone: **M8 — Participant Queue UI** (frontend).
 
-## M6 scope (plan.md §M6)
+## M7 scope (plan.md §M7)
 
-- Validate a YouTube URL (watch + youtu.be) and extract the video ID.
-- Fetch metadata (title, channel, duration, thumbnail).
-- Return a preview with a warning for unusually long videos (never reject).
+- Authoritative queue engine: `QueueEntry` + `YouTubeVideo` (+ `Round`) tables.
+- Submit a song (participant), public queue snapshot, cancel own WAITING entry
+  (participant), remove any entry + edit a YouTube URL (host).
+- Ordering by creation, not a mutable position field (B7/D8).
+- Active-entry limit (B15/D17) and duplicate-song notice (B16/D15).
 
-## Verification results (M6 acceptance criteria, plan.md §M6)
+## Verification results (M7 acceptance criteria, plan.md §M7)
 
 | Acceptance criterion | Result |
 | -------------------- | ------ |
-| Participant pastes a valid YouTube URL and sees a preview before joining | Verified — `POST /api/v1/sessions/{id}/entries/preview` (participant token) returns canonical URL, video id, title, channel, duration, thumbnail plus `is_long`/`warning` (`test_preview_returns_metadata`, `test_preview_long_video_warns_but_is_not_rejected`). Long videos warn but are never rejected (B6/D34). |
+| Multiple users can join and queue order remains deterministic | Verified — two participants submit sequentially and the snapshot returns them in submission order with positions 1 and 2 (`test_snapshot_returns_deterministic_order_and_positions`); ordering is `created_at` (microsecond Python default) + `id` tie-break (D36), caught a real SQLite second-precision bug during development. |
 
 Extra verification performed:
 
-- URL validation: watch (`youtube.com`, `m.`, `music.`), youtu.be, embed, shorts
-  all extract the 11-char ID; 15 invalid cases rejected (parametrized
-  `test_extract_video_id_*`).
-- Metadata source is the YouTube Data API v3 (D33); the fetch is tested with an
-  `httpx.MockTransport` (no network): parsing, empty items → unavailable, HTTP
-  error → unavailable, missing title → unavailable, missing API key →
-  configuration error (`tests/test_youtube.py`).
-- Endpoint guards: 401 without/with invalid participant token, 404 for another
-  session's participant or unknown session, 409 for ended sessions, 422 for
-  malformed URLs (E3), 404 for unavailable videos (E4), 503 when the API key is
-  unset.
-- `uv run pytest`: 129 passed (46 new: 37 unit + 9 endpoint). `uv run pyright`:
-  0 errors, 0 warnings.
-- Health, host auth, sessions, join endpoints unchanged and still green.
+- Submission guards: 401 without a token, 404 for a participant from another
+  session, 409 for ended sessions, 422 for bad URLs, 404 for unavailable videos,
+  409 at the active-entry limit (2 per participant per round, B15).
+- Duplicate songs are allowed with an informational notice, never a block (B16);
+  duplicate submissions share one `youtube_videos` row.
+- Participant cancel (B3): own WAITING → 204/CANCELLED; others' entries, foreign
+  sessions, and non-WAITING entries → 404/409.
+- Host remove (B4): any entry → REMOVED; non-owner host → 404. Host edit (E7):
+  position + participant preserved, invalid replacement keeps the old URL.
+- `alembic check`: no drift; migration `0005_queue` upgrade → downgrade → upgrade
+  verified on SQLite (round 1 is created by the service, not the migration).
+- `uv run pytest`: 158 passed (27 new). `uv run pyright`: 0 errors, 0 warnings.
+- Health, auth, sessions, join, preview endpoints unchanged and still green.
 
-## Files changed (M6)
+## Files changed (M7)
 
 ```text
-backend/pyproject.toml                (httpx moved to runtime deps)
-backend/uv.lock                       (updated)
-backend/app/core/config.py            (+ youtube_api_key, youtube_long_video_seconds)
-backend/.env.example                  (+ KARAOKE_YOUTUBE_API_KEY, KARAOKE_YOUTUBE_LONG_VIDEO_SECONDS)
-backend/app/schemas/youtube.py        (new — SongPreviewRequest/Response, YouTubeVideoData)
-backend/app/services/youtube.py       (new — extract_video_id, duration parsing, Data API fetch)
-backend/app/services/participant.py   (+ get_by_token)
-backend/app/services/session.py       (+ get_by_id)
-backend/app/api/dependencies.py       (+ get_current_participant)
-backend/app/api/routes/entries.py     (new — POST .../entries/preview)
-backend/app/main.py                   (include entries router)
-backend/tests/test_youtube.py         (new — 30 unit tests)
-backend/tests/test_entries.py         (new — 14 endpoint tests)
-backend/tests/test_config.py          (pin new settings defaults)
-docs/API_CONTRACT.md                  (§5 preview implemented)
-docs/DECISIONS.md                     (D33 Data API v3, D34 long-video threshold; open Q resolved)
-docs/ARCHITECTURE.md                  (§3 implementation status, §7 phases)
-docs/PROJECT_BRAIN.md                 (milestones, limitations, decisions)
-docs/DEV_BRAIN.md                     (updated, this file)
-docs/RUNBOOK.md                       (M6 checklist + preview smoke test)
+backend/app/domain/queue_entry.py        (new — QueueEntryStatus enum)
+backend/app/models/youtube_video.py      (new — YouTubeVideo metadata row)
+backend/app/models/round.py              (new — Round, created with the session)
+backend/app/models/queue_entry.py        (new — QueueEntry + relationships)
+backend/app/models/__init__.py           (register new models)
+backend/app/services/session.py          (create round 1 with the session)
+backend/app/services/queue.py            (new — QueueService: submit/snapshot/cancel/remove/edit)
+backend/app/schemas/queue.py             (new — submit/snapshot/entry schemas)
+backend/app/api/routes/entries.py        (+ submit, snapshot, delete, edit endpoints)
+backend/app/api/dependencies.py          (+ get_host_or_participant)
+backend/app/main.py                      (include entry_router)
+backend/alembic/versions/0005_queue.py   (new — youtube_videos, rounds, queue_entries)
+backend/tests/test_queue.py              (new — 27 tests)
+docs/API_CONTRACT.md                     (§5 songs/queue implemented)
+docs/DECISIONS.md                        (D35 rounds at creation, D36 ordering, D37 shared video rows/dual-actor delete)
+docs/ARCHITECTURE.md                     (§3 implementation status, §7 phases)
+docs/PROJECT_BRAIN.md                    (milestones, limitations, decisions)
+docs/DEV_BRAIN.md                        (updated, this file)
+docs/RUNBOOK.md                          (M7 checklist + queue smoke test)
 ```
 
-## Implementation notes (M6)
+## Implementation notes (M7)
 
-- **Metadata source (D33):** YouTube Data API v3
-  (`videos?part=snippet,contentDetails`). The oEmbed endpoint was rejected
-  because it has no duration field. `KARAOKE_YOUTUBE_API_KEY` is required for
-  real use; unset → 503. The `fetch_video_metadata` method accepts an optional
-  `httpx.AsyncClient` so tests inject a `MockTransport` (no key, no network).
-- **URL validation:** `extract_video_id` supports `watch?v=`, youtu.be, embed,
-  and shorts; rejects non-http(s) schemes, non-YouTube hosts, missing/malformed
-  IDs. Returns the canonical watch URL in the response.
-- **Duration:** `parse_iso_duration` converts `PT#H#M#S` to seconds;
-  `format_duration` renders `m:ss`/`h:mm:ss` for the warning text.
-- **Long-video warning (D34):** `is_long = duration_seconds >
-  KARAOKE_YOUTUBE_LONG_VIDEO_SECONDS` (default 600 s); the warning is advisory
-  only — the preview always returns 200 for fetchable videos.
-- **Participant auth:** new `get_current_participant` dependency resolves the
-  participant from the M5 opaque token; endpoints additionally enforce the
-  participant's session binding (mismatch → 404, no existence leak) and the
-  ended-session guard (409).
-- **Preview is stateless:** nothing is persisted until the queue entry lands in
-  M7 (no `YouTubeVideo` table yet). The response shape matches the fields M7
-  will store.
-- **FastAPI D30 rule respected:** the new endpoint is named `preview_song`; no
-  `__name__` collision with the `get_session`/`get_current_participant`
-  dependencies.
+- **Rounds (D35):** `rounds` table with `(session_id, number)` unique; round 1 is
+  created in the same transaction as the session. Queue entries, positions, and
+  the active-entry limit are scoped to the session's latest round; M16 adds
+  round N+1 without schema changes.
+- **Ordering (D36):** `ORDER BY created_at, id`; `created_at` is assigned in
+  Python (microsecond) because SQLite's `CURRENT_TIMESTAMP` is second-precision
+  and scrambled same-second submissions (reproduced by a test before the fix).
+- **Positions (D8):** computed from the ordered active queue when rendered;
+  `position` in responses is derived (never stored).
+- **YouTubeVideo (D37):** one immutable metadata row per unique video id,
+  find-or-create with race handling (unique-index IntegrityError → re-select).
+  Duplicate songs share the row; host edits point the entry at a new row.
+- **Dual-actor DELETE (D37):** `get_host_or_participant` resolves the token as a
+  participant (→ cancel) or host (→ remove); foreign entries/sessions → 404.
+- **Active-entry limit (B15/D17):** 2 non-terminal entries (WAITING/NEXT/SINGING)
+  per participant per round, counted server-side before insert.
+- **Relationships:** `QueueEntry.participant/youtube_video/round` use
+  `lazy="selectin"` (no N+1, no async lazy-load pitfalls). The host-edit path
+  explicitly refreshes `youtube_video` after commit (the identity map otherwise
+  serves the stale relationship).
+- **FastAPI D30 rule respected:** new endpoints are `submit_song`,
+  `queue_snapshot`, `delete_entry`, `edit_entry_video`; none collide with the
+  `get_session`/`get_current_host`/`get_current_participant`/
+  `get_host_or_participant` dependency names.
 
-## Tests added (M6)
+## Tests added (M7)
 
-- `tests/test_youtube.py` — 37 unit tests: 10 supported URL shapes + 12 invalid
-  shapes for `extract_video_id` (parametrized), `parse_iso_duration` (7 cases),
-  `format_duration`, and 7 Data API fetch tests via `httpx.MockTransport`
-  (success parsing, missing key, empty items, HTTP error, missing title,
-  transport error, non-JSON body).
-- `tests/test_entries.py` — 9 endpoint tests: auth required, cross-session
-  404, unknown session 404, ended session 409, invalid URL 422, metadata 200,
-  long-video warning, unavailable video 404, unconfigured service 503.
-- **129 passed** total (was 85 at M5).
+- `tests/test_queue.py` — 27 tests: submit (auth, WAITING entry shape, cross-
+  session 404, ended 409, bad URL 422, unavailable 404, active-entry limit 409,
+  duplicate notice, cancel-frees-a-slot), snapshot (public, deterministic order +
+  positions, excludes processed, unknown 404), cancel (auth, own WAITING 204,
+  others' 404, foreign session 404, non-WAITING 409, unknown 404), remove (host
+  any entry, non-owner 404, unknown 404), edit (host-only auth, keeps position +
+  participant, non-owner 404, invalid URL keeps old video), persistence (entries
+  + shared video row).
+- **158 passed** total (was 131 at M6).
 
 ## Current blockers
 
@@ -120,8 +121,8 @@ docs/RUNBOOK.md                       (M6 checklist + preview smoke test)
 
 ## Next recommended task
 
-**M7 — Queue Management** — the authoritative queue engine: `QueueEntry` +
-`YouTubeVideo` tables, `POST /sessions/{id}/entries` (submit, with the M6
-preview data), public queue snapshot with computed positions (D8, no mutable
-position field), participant cancel of own WAITING entry, host remove/edit.
-See `plan.md` §M7 and `docs/PRODUCT_SPEC.md` §6.5-6.6 / §9 B3-B7, D15-D17.
+**M8 — Participant Queue UI** (frontend): mobile-first queue screen using the
+public snapshot endpoint from M7 — current singer, up next, queue with the
+participant's position highlighted, submit song via preview + confirm, cancel
+own WAITING entry, next-round prompt stub. First frontend milestone; see
+`plan.md` §M8 and `docs/PRODUCT_SPEC.md` §6.5-6.6 / §7.1-7.3.

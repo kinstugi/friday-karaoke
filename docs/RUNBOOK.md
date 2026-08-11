@@ -94,7 +94,7 @@ npm run typecheck
 npm run lint
 ```
 
-## Verification checklist (M6)
+## Verification checklist (M7)
 
 ```bash
 # From the repo root
@@ -105,40 +105,52 @@ cd backend && uv sync && uv run alembic upgrade head
 uv run pytest && uv run pyright
 uv run uvicorn app.main:app --reload
 
-# Host auth + session + participant smoke test (real PostgreSQL)
+# Setup: host -> session -> two participants (real PostgreSQL)
 curl -X POST http://localhost:8000/api/v1/auth/host/register \
   -H 'Content-Type: application/json' \
   -d '{"email":"host@school.edu","password":"correct-horse-battery"}'   # 201
 curl -X POST http://localhost:8000/api/v1/auth/host/login \
   -H 'Content-Type: application/json' \
   -d '{"email":"host@school.edu","password":"correct-horse-battery"}'
-TOKEN=<token from the login response>
+TOKEN=<host token>
 curl -X POST http://localhost:8000/api/v1/sessions \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{}'
-JOIN_CODE=<join_code from the create response>
-SESSION_ID=<id from the create response>
+SESSION_ID=<session id>
+JOIN_CODE=<join code>
 curl -X POST http://localhost:8000/api/v1/join/$JOIN_CODE/participants \
-  -H 'Content-Type: application/json' -d '{"nickname":"Emma"}'
-PTOKEN=<participant token from the join response>
+  -H 'Content-Type: application/json' -d '{"nickname":"Alice"}'
+PTOKEN_A=<participant token>
+curl -X POST http://localhost:8000/api/v1/join/$JOIN_CODE/participants \
+  -H 'Content-Type: application/json' -d '{"nickname":"Bob"}'
+PTOKEN_B=<participant token>
 
-# Preview smoke test (needs KARAOKE_YOUTUBE_API_KEY in backend/.env)
-curl -X POST http://localhost:8000/api/v1/sessions/$SESSION_ID/entries/preview \
-  -H "Authorization: Bearer $PTOKEN" \
-  -H 'Content-Type: application/json' \
-  -d '{"youtube_url":"https://youtu.be/dQw4w9WgXcQ"}'
-#   -> 200 {video_id, title, channel, duration_seconds, thumbnail_url, is_long, warning}
-# Without a participant token: 401. Garbage URL: 422. Unavailable video: 404.
+# Queue smoke test (needs KARAOKE_YOUTUBE_API_KEY in backend/.env)
+curl -X POST http://localhost:8000/api/v1/sessions/$SESSION_ID/entries \
+  -H "Authorization: Bearer $PTOKEN_A" -H 'Content-Type: application/json' \
+  -d '{"youtube_url":"https://youtu.be/dQw4w9WgXcQ"}'                    # 201, position 1
+curl -X POST http://localhost:8000/api/v1/sessions/$SESSION_ID/entries \
+  -H "Authorization: Bearer $PTOKEN_B" -H 'Content-Type: application/json' \
+  -d '{"youtube_url":"https://youtu.be/9bZkp7q19f0"}'                    # 201, position 2
+curl http://localhost:8000/api/v1/sessions/$SESSION_ID/entries           # public snapshot, positions 1..2
+ENTRY_ID=<entry id from the snapshot>
+curl -X DELETE http://localhost:8000/api/v1/entries/$ENTRY_ID \
+  -H "Authorization: Bearer $PTOKEN_A"                                   # 204 (cancel own WAITING)
+curl -X PATCH http://localhost:8000/api/v1/entries/$ENTRY_ID/video \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"youtube_url":"https://youtu.be/9bZkp7q19f0"}'                    # 200, position kept (host)
+curl -X DELETE http://localhost:8000/api/v1/entries/$ENTRY_ID \
+  -H "Authorization: Bearer $TOKEN"                                      # 204 (host remove)
 
-# Frontend (unchanged by M6)
+# Frontend (unchanged by M7)
 cd ../frontend && npm install && npm run build && npm run typecheck
 ```
 
-This satisfies the M6 acceptance criteria: a participant pastes a valid YouTube
-URL and sees a preview (title/channel/duration/thumbnail) with a warning for
-unusually long videos — never a rejection. URL format validation (E3),
-unavailable-video handling (E4), participant token auth, session binding, and
-the ended-session guard are all enforced server-side. Health, host auth,
-sessions, and join endpoints from M2-M5 are unchanged.
+This satisfies the M7 acceptance criteria: multiple participants submit and the
+public snapshot returns the queue in deterministic submission order with
+computed positions. The active-entry limit (2), duplicate-song notice, participant
+cancel of own WAITING entries, and host remove/edit are enforced server-side.
+Health, host auth, sessions, join, and preview endpoints from M2-M6 are
+unchanged.
 
 ## Branch / commit workflow
 

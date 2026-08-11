@@ -8,6 +8,18 @@ from app.models.base import Base
 from app.models.host import Host
 from app.models.host_auth_token import HostAuthToken
 from app.models.participant import Participant
+from app.models.queue_entry import QueueEntry
+from app.models.round import Round
 from app.models.session import Session
+from app.models.youtube_video import YouTubeVideo
 
-__all__ = ["Base", "Host", "HostAuthToken", "Participant", "Session"]
+__all__ = [
+    "Base",
+    "Host",
+    "HostAuthToken",
+    "Participant",
+    "QueueEntry",
+    "Round",
+    "Session",
+    "YouTubeVideo",
+]

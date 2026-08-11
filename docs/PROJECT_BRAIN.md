@@ -165,11 +165,18 @@ limit, sessions not tied to a browser) are in `docs/PRODUCT_SPEC.md` §8–§9 a
 
 ## 8. Current milestone
 
-**M7 — Queue Management** (next). M6 is complete; see `docs/DEV_BRAIN.md` for
-live status.
+**M8 — Participant Queue UI** (next, first frontend milestone). M7 is complete;
+see `docs/DEV_BRAIN.md` for live status.
 
 ## 9. Completed milestones
 
+- **M7 — Queue Management** (complete): the authoritative queue engine —
+  `QueueEntry` + `YouTubeVideo` + `Round` tables (migration `0005_queue`; round 1
+  created with the session, D35), submit (`POST /sessions/{id}/entries`, with the
+  active-entry limit B15 and duplicate notice B16), public queue snapshot with
+  computed positions (D8/D36), participant cancel of own WAITING entry and host
+  remove via one dual-actor endpoint (D37), and host URL editing (E7). Queue
+  decisions D35–D37 recorded in `docs/DECISIONS.md`.
 - **M6 — YouTube URL Submission + Metadata** (complete): `POST
   /api/v1/sessions/{id}/entries/preview` (participant token) validates YouTube
   URLs (watch/youtu.be/embed/shorts), extracts the video ID, fetches metadata
@@ -220,22 +227,23 @@ live status.
 
 ## 10. Known limitations
 
-- No queue yet (queue entries + persistence land in M7); the M6 preview is
-  stateless.
-- Only the `Host`, `HostAuthToken`, `Session`, and `Participant` domain tables
-  exist (migration `0004`). PAUSED and ROUND_COMPLETE session states are defined
-  but not reachable yet (M14/M16).
-- Song previews require `KARAOKE_YOUTUBE_API_KEY` (YouTube Data API v3, D33);
-  without it the preview endpoint returns 503. Tests mock the HTTP call.
-- Participant tokens are issued at join but only authorize participant
-  endpoints from M6 (preview) / M7 (queue).
+- No playback yet (M11/M12); queue entries stay WAITING — NEXT/SINGING statuses
+  exist but are not yet assigned. Rounds are created but the round lifecycle
+  (enrollment, next round) lands in M16.
+- Only the Host/HostAuthToken/Session/Participant/YouTubeVideo/Round/QueueEntry
+  tables exist (migration `0005`). PAUSED and ROUND_COMPLETE session states are
+  defined but not reachable yet (M14/M16).
+- Song previews and submissions require `KARAOKE_YOUTUBE_API_KEY` (YouTube Data
+  API v3, D33); without it those endpoints return 503. Tests mock the HTTP call.
 - Host bearer tokens are long-lived (30 days) unless logged out; fine for the
   pilot, token rotation/refresh is not in scope for v1.
 - Browser autoplay policies will require host interaction before audio playback
   (to be designed for in M12/M13).
 - The automated test suite uses in-memory SQLite; Postgres-specific SQL should be
   avoided in domain code or handled dialect-aware (see DECISIONS D22). UUID columns
-  use the generic `sqlalchemy.Uuid` type, which is dialect-safe.
+  use the generic `sqlalchemy.Uuid` type, which is dialect-safe. Queue ordering
+  uses a microsecond Python timestamp default to keep SQLite tests deterministic
+  (D36).
 - FastAPI 0.141.1 has an unresolved dependency-name collision bug (D30): an
   endpoint function sharing a `__name__` with a dependency breaks literal-suffix
   routes. Workaround (naming convention) is in effect; watch for an upstream fix.
@@ -269,6 +277,10 @@ See `docs/DECISIONS.md` for the full, maintained list. Highlights:
 - YouTube previews (M6): metadata comes from the YouTube Data API v3 with
   `KARAOKE_YOUTUBE_API_KEY` (D33); long videos warn but are never auto-rejected,
   threshold configurable via `KARAOKE_YOUTUBE_LONG_VIDEO_SECONDS` (D34).
+- Queue engine (M7): rounds exist from session creation and entries are
+  round-scoped (D35); ordering is microsecond `created_at` + `id` tie-break (D36);
+  YouTubeVideo rows are shared per video id and DELETE /entries/{id} is dual-actor
+  (participant cancel vs host remove) (D37).
 - No user-visible feature in M0 beyond a health check.
 
 ## 12. Commands for running / testing
