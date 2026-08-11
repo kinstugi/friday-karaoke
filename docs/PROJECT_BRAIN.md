@@ -165,11 +165,17 @@ limit, sessions not tied to a browser) are in `docs/PRODUCT_SPEC.md` §8–§9 a
 
 ## 8. Current milestone
 
-**M3 — Host Authentication** (next). M2 is complete; see
+**M4 — Karaoke Session Creation** (next). M3 is complete; see
 `docs/DEV_BRAIN.md` for live status.
 
 ## 9. Completed milestones
 
+- **M3 — Host Authentication** (complete): host registration/login with
+  email/password, bcrypt password hashing, opaque revocable bearer tokens (only a
+  SHA-256 digest stored), logout, the `get_current_host` dependency protecting host
+  endpoints, `GET /api/v1/auth/host/me`, `Host` + `HostAuthToken` tables (migration
+  `0002_host_auth`), and confirmation of the `/api/v1` API base path (D26). Auth
+  decisions D25–D26 recorded in `docs/DECISIONS.md`.
 - **M2 — Backend Skeleton + Database** (complete): FastAPI app factory, async
   SQLAlchemy 2.x + asyncpg, PostgreSQL via Docker Compose (`compose.yaml`), Alembic
   migrations (async env, initial revision), Pydantic Settings (`KARAOKE_` prefix),
@@ -189,13 +195,16 @@ limit, sessions not tied to a browser) are in `docs/PRODUCT_SPEC.md` §8–§9 a
 
 ## 10. Known limitations
 
-- No business functionality yet (auth, sessions, queue, playback land from M3).
-- No domain tables exist yet (the initial migration anchors the Alembic chain;
-  tables arrive with M4+ models).
+- No business functionality beyond host auth yet (sessions, queue, playback land
+  from M4).
+- Only the `Host` and `HostAuthToken` domain tables exist (migration `0002`).
+- Host bearer tokens are long-lived (30 days) unless logged out; fine for the
+  pilot, token rotation/refresh is not in scope for v1.
 - Browser autoplay policies will require host interaction before audio playback
   (to be designed for in M12/M13).
 - The automated test suite uses in-memory SQLite; Postgres-specific SQL should be
-  avoided in domain code or handled dialect-aware (see DECISIONS D22).
+  avoided in domain code or handled dialect-aware (see DECISIONS D22). UUID columns
+  use the generic `sqlalchemy.Uuid` type, which is dialect-safe.
 
 ## 11. Important decisions
 
@@ -213,6 +222,9 @@ See `docs/DECISIONS.md` for the full, maintained list. Highlights:
   tied to a browser connection.
 - Async SQLAlchemy + asyncpg; self-contained SQLite test suite; dev PostgreSQL via
   Docker Compose; stdlib JSON logging (M2, DECISIONS D21–D24).
+- Host auth: email/password + bcrypt, opaque revocable bearer tokens hashed at rest
+  (D25); business API base path `/api/v1` confirmed, health endpoints stay at root
+  (M3, DECISIONS D25–D26).
 - No user-visible feature in M0 beyond a health check.
 
 ## 12. Commands for running / testing

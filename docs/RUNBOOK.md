@@ -94,7 +94,7 @@ npm run typecheck
 npm run lint
 ```
 
-## Verification checklist (M2)
+## Verification checklist (M3)
 
 ```bash
 # From the repo root
@@ -103,15 +103,30 @@ docker compose up -d db
 # Backend
 cd backend && uv sync && uv run alembic upgrade head
 uv run pytest && uv run pyright
-uv run uvicorn app.main:app --reload   # then curl /health/ready
+uv run uvicorn app.main:app --reload
 
-# Frontend (unchanged by M2)
+# Host auth smoke test (real PostgreSQL)
+curl -X POST http://localhost:8000/api/v1/auth/host/register \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"host@school.edu","password":"correct-horse-battery"}'   # 201
+curl -X POST http://localhost:8000/api/v1/auth/host/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"host@school.edu","password":"correct-horse-battery"}'
+#   -> 200 {"token": "...", "token_type": "bearer", "host": {...}}
+TOKEN=<token from the login response>
+curl http://localhost:8000/api/v1/auth/host/me -H "Authorization: Bearer $TOKEN"  # 200
+curl http://localhost:8000/api/v1/auth/host/me                                   # 401
+curl -X POST http://localhost:8000/api/v1/auth/host/logout -H "Authorization: Bearer $TOKEN"  # 204
+curl http://localhost:8000/api/v1/auth/host/me -H "Authorization: Bearer $TOKEN"  # 401 now
+
+# Frontend (unchanged by M3)
 cd ../frontend && npm install && npm run build && npm run typecheck
 ```
 
-This satisfies the M2 acceptance criteria: application starts, PostgreSQL
-connects, migrations run, health endpoint works, automated tests run, Pydantic
-contracts, Pydantic Settings configuration, and static type checks pass.
+This satisfies the M3 acceptance criteria: anonymous users cannot create sessions
+(session creation is M4; the `/me` guard is verified), authenticated hosts can
+access host endpoints, and each token is bound to exactly one host (the foundation
+for M4's cross-host ownership checks). Health endpoints from M2 are unchanged.
 
 ## Branch / commit workflow
 

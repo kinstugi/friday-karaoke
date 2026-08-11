@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     debug: bool = False
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     database_url: str = "postgresql+asyncpg://karaoke:karaoke@localhost:5432/karaoke"
+    #: Lifetime of a host bearer token (M3). Logout revokes it early.
+    auth_token_ttl_days: int = 30
 
 
 @lru_cache

@@ -7,106 +7,112 @@ of every milestone. The persistent context lives in `PROJECT_BRAIN.md`.
 
 ## Current milestone
 
-**M2 — Backend Skeleton + Database** — COMPLETE (verified).
+**M3 — Host Authentication** — COMPLETE (verified).
 
 ## Current task
 
-None (milestone finished). Next milestone: **M3 — Host Authentication**.
+None (milestone finished). Next milestone: **M4 — Karaoke Session Creation**.
 
-## Verification results (M2 acceptance criteria, plan.md §M2)
+## M3 scope (plan.md §M3)
+
+- Host registration/login with email/password.
+- Password hashing (bcrypt).
+- Authentication tokens (opaque bearer tokens, revocable).
+- Authorization (host-only endpoints via `get_current_host`).
+- Logout (revokes the token).
+- Protected host endpoints (`GET /api/v1/auth/host/me`; the session endpoints
+  themselves land in M4 and reuse `get_current_host`).
+
+## Verification results (M3 acceptance criteria, plan.md §M3)
 
 | Acceptance criterion | Result |
 | -------------------- | ------ |
-| Application starts | Verified — `uvicorn app.main:app` serves the API |
-| PostgreSQL connects | Verified — readiness endpoint 200 against dockerized Postgres; 503 when stopped |
-| Migrations run | Verified — `alembic upgrade head` applied `0001_initial` to real Postgres |
-| Health endpoint works | Verified — `/`, `/health`, `/health/ready` all correct (see API_CONTRACT) |
-| Automated test project runs | Verified — `uv run pytest`: 9 passed (SQLite, self-contained) |
-| API request/response contracts use Pydantic models | Yes — `app/schemas/health.py` (ServiceInfo, ReadinessResponse, ComponentStatus) |
-| Configuration uses Pydantic Settings | Yes — `app/core/config.py`, `KARAOKE_` prefix, cached singleton |
-| Static type checking configured and passes | Verified — `uv run pyright`: 0 errors, 0 warnings |
+| Anonymous users cannot create sessions | Session creation is M4; the auth infrastructure is verified by `GET /api/v1/auth/host/me` returning 401 without/with an invalid token. M4 session endpoints reuse `get_current_host`. |
+| Authenticated host can access host endpoints | Verified — `GET /me` returns 200 with the host profile using a login token (SQLite tests + real PostgreSQL smoke test). |
+| Another host cannot modify someone else's session | Sessions land in M4, but the foundation is verified: each token resolves to exactly the host it was issued to (`test_me_returns_own_host_not_another`). M4 ownership checks build on this. |
 
 Extra verification performed:
 
-- `GET /health/ready` returned HTTP 503 `{"detail":"database unavailable"}` while
-  Postgres was stopped (liveness endpoints unaffected).
-- OpenAPI schema lists `['/', '/health', '/health/ready']`; structured JSON logs
-  confirmed (uvicorn error/access lines emitted as single-line JSON).
-- Frontend unaffected: `npm run typecheck`, `npm run lint`, `npm run build` clean.
+- Full curl smoke test against real PostgreSQL (uvicorn): register 201 (email
+  normalized lowercase), duplicate register 409, case-insensitive login 200 with
+  token, `/me` 200 with valid token and 401 with garbage token, anonymous 401,
+  logout 204, `/me` 401 after logout.
+- `alembic check` reports "No new upgrade operations detected" — the migration
+  exactly matches the ORM models.
+- Migration `0002_host_auth` verified on SQLite (upgrade → downgrade → upgrade) and
+  real PostgreSQL (native `uuid`, `timestamptz`, unique indexes, FK `ON DELETE
+  CASCADE`).
+- `/`, `/health`, `/health/ready` unchanged and still 200 against Postgres;
+  structured JSON logging confirmed on `uv run uvicorn`.
+- `uv run pytest`: 35 passed. `uv run pyright`: 0 errors, 0 warnings.
+- Frontend untouched (M3 is backend-only).
 
-## Files changed (M2)
+## Files changed (M3)
 
 ```text
-backend/app/main.py              (rewritten — app factory create_app)
-backend/app/core/                (new — config.py, logging.py, database.py)
-backend/app/models/              (new — base.py + __init__)
-backend/app/schemas/             (new — health.py + __init__)
-backend/app/api/                 (new — routes/health.py + __init__)
-backend/app/domain/              (new — placeholder package)
-backend/app/services/            (new — placeholder package)
-backend/app/repositories/        (new — placeholder package)
-backend/alembic/                 (new — async env.py, initial revision)
-backend/alembic.ini              (new)
-backend/.env.example             (new)
-backend/tests/                   (conftest.py new; test_health.py updated;
-                                  test_config.py, test_database.py new)
-backend/pyproject.toml           (updated — deps, asyncio_mode)
-backend/uv.lock                  (updated)
-compose.yaml                     (new — dev PostgreSQL)
-docs/DECISIONS.md                (updated — D21–D24)
-docs/ARCHITECTURE.md             (updated — §3 implemented state, §7 phases)
-docs/API_CONTRACT.md             (updated — §1 health incl. /health/ready)
-docs/RUNBOOK.md                  (updated — DB setup, M2 checklist)
-docs/PROJECT_BRAIN.md            (updated — milestones, commands, limitations)
-docs/DEV_BRAIN.md                (updated, this file)
+backend/pyproject.toml                (deps: bcrypt, email-validator)
+backend/uv.lock                       (updated)
+backend/app/core/config.py            (+ auth_token_ttl_days)
+backend/app/core/security.py          (new — bcrypt hash/verify, token gen/hash)
+backend/app/models/host.py            (new — Host)
+backend/app/models/host_auth_token.py (new — HostAuthToken)
+backend/app/models/__init__.py        (register new models)
+backend/app/schemas/auth.py           (new — register/login/host/auth responses)
+backend/app/services/host_auth.py     (new — HostAuthService)
+backend/app/api/dependencies.py       (new — bearer_scheme, get_current_host)
+backend/app/api/routes/auth.py        (new — /api/v1/auth/host router)
+backend/app/main.py                   (include auth router)
+backend/alembic/versions/0002_host_auth.py (new — hosts + host_auth_tokens)
+backend/tests/conftest.py             (+ autouse schema create/drop fixture)
+backend/tests/test_auth.py            (new — 19 endpoint/service tests)
+backend/tests/test_security.py        (new — 7 unit tests)
+backend/tests/test_config.py          (pin KARAOKE_AUTH_TOKEN_TTL_DAYS default)
+backend/.env.example                  (+ KARAOKE_AUTH_TOKEN_TTL_DAYS)
+docs/API_CONTRACT.md                  (§2 host auth implemented, base path confirmed)
+docs/DECISIONS.md                     (D25 opaque tokens, D26 base path; open Q resolved)
+docs/ARCHITECTURE.md                  (§3 implementation status, §7 phases)
+docs/PROJECT_BRAIN.md                 (milestones, limitations, decisions)
+docs/DEV_BRAIN.md                     (updated, this file)
 ```
 
-## Implementation notes (M2)
+## Implementation notes (M3)
 
-- **Layering:** api/core/models/schemas are live; domain/services/repositories are
-  placeholder packages per the planned layout (ARCHITECTURE §3) and get real
-  content from M4 onward. No unnecessary abstractions were added.
-- **DB engine:** built once from settings (`app.core.database.build_engine`);
-  SQLite URLs get a static pool so tests share one in-memory database. Engines
-  connect lazily, so import never blocks on an unreachable database.
-- **Readiness:** `/health/ready` probes with `SELECT 1` through the real
-  `get_session` dependency and returns 503 on failure. Liveness (`/`, `/health`)
-  stays database-independent.
-- **Alembic:** async env reads the URL from `get_settings()` (not alembic.ini);
-  `target_metadata = Base.metadata` for autogenerate. Initial revision is empty —
-  no domain models exist yet.
-- **Tests:** `tests/conftest.py` sets `KARAOKE_ENVIRONMENT=test` and
-  `KARAOKE_DATABASE_URL=sqlite+aiosqlite://` before the app is imported, so the
-  whole suite (incl. `/health/ready`) runs against SQLite without Docker. Env vars
-  are hard-assigned (not `setdefault`) and config tests pin expected values
-  explicitly, so a developer's local `backend/.env` (RUNBOOK setup step) cannot
-  break the suite — verified both with and without `.env`.
-- **Pyright note:** pydantic-settings' generated `_env_file`/`_secrets_dir`
-  constructor params are unknown to pyright; tests construct `Settings()` directly
-  (environment variables are pinned in conftest, so behavior is deterministic).
+- **Auth mechanism (D25):** opaque bearer tokens issued at login, stored only as a
+  SHA-256 digest (`host_auth_tokens.token_hash`). Logout deletes the row. Tokens
+  expire after `KARAOKE_AUTH_TOKEN_TTL_DAYS` (default 30). No JWT, no cookies.
+- **Passwords:** bcrypt via the `bcrypt` library directly (no passlib). API schemas
+  cap password length at 72 characters (bcrypt's byte limit) and require ≥ 8.
+- **Emails:** `EmailStr` (email-validator) + lowercase normalization in the
+  service; the `unique` constraint on the (lowercased) email gives case-insensitive
+  uniqueness on both SQLite and PostgreSQL.
+- **Layering:** `services/` gained its first real use-case (`HostAuthService`).
+  `repositories/` is still a placeholder — the service talks to the session
+  directly; a repository layer will be introduced at M4+ when persistence logic is
+  actually shared. `domain/` remains a placeholder (no domain enums needed for M3).
+- **UUIDs:** `sqlalchemy.Uuid` for all PK/FK columns — native `uuid` on PostgreSQL,
+  `CHAR(32)` on SQLite (dialect-safe per D22).
+- **Timezone safety:** token expiry is checked in Python (`_is_expired`) rather than
+  in SQL, because SQLite returns naive datetimes and PostgreSQL returns aware ones;
+  the helper normalizes the comparison.
+- **Expired-token handling:** expired tokens are treated as unknown (401
+  "invalid or expired token"); they are not auto-deleted (cleanup can come with M17).
+- **Logout is idempotent:** revoking an already-revoked/unknown token returns 204.
+- **Tests:** `conftest.py` gained an autouse fixture that drops/creates all tables
+  before every test (the test engine uses one in-memory SQLite DB via a static
+  pool, so per-test DDL gives isolation). `Host`/`HostAuthToken` registered in
+  `app/models/__init__.py` for both Alembic autogenerate and the test fixture.
 
-## Post-review fixes (M2)
+## Tests added (M3)
 
-Applied after the reviewer's `NEEDS_CHANGES` finding:
-
-- `tests/conftest.py` — hard-assigned test env vars (was `setdefault`) so shell/.env
-  leakage is impossible.
-- `tests/test_config.py::test_settings_defaults` — pins expected default values via
-  `monkeypatch.setenv` (env precedence beats dotenv); no longer breaks when a local
-  `backend/.env` exists.
-- `app/api/routes/health.py` — readiness now calls `check_database_connection`
-  helper instead of duplicating the probe.
-- `tests/test_database.py` — test renamed to assert the observable contract
-  (single usable session); dropped a flawed `is_active` closed-state assertion
-  (`is_active` is not a closed-state signal in SQLAlchemy).
-- `app/schemas/health.py` — status fields tightened to `Literal["ok"]`.
-
-## Tests added (M2)
-
-- `tests/test_health.py` — `/`, `/health`, `/health/ready` (3 tests).
-- `tests/test_config.py` — settings defaults, env override, env prefix (3 tests).
-- `tests/test_database.py` — readiness probe, session query, DI yield/close (3 tests).
-- **9 passed** total.
+- `tests/test_security.py` — bcrypt hashing/verification (incl. malformed hash),
+  token generation uniqueness/opacity, deterministic SHA-256 digesting (7 tests).
+- `tests/test_auth.py` — registration (create, lowercase normalization, duplicate
+  conflict, invalid email, short/overlong password), login (token+bearer, case
+  insensitivity, wrong password, unknown email), protected `/me` (401 anonymous,
+  401 invalid token, returns own host, distinct hosts per token), logout (revokes,
+  requires auth), at-rest hygiene (bcrypt hash stored, token stored hashed not
+  plaintext), expired token rejected (19 tests).
+- **35 passed** total (was 9 at M2).
 
 ## Current blockers
 
@@ -114,13 +120,14 @@ Applied after the reviewer's `NEEDS_CHANGES` finding:
 
 ## Unresolved technical questions
 
-- None for M2. Tracked in `docs/DECISIONS.md` (Open questions): host auth mechanism
-  (M3), YouTube metadata source (M6), realtime payload schemas (M10), Web Push (M15).
+- Tracked in `docs/DECISIONS.md` (Open questions): YouTube metadata source (M6),
+  realtime payload schemas (M10), Web Push (M15).
 - Starlette deprecation warning (`httpx` vs `httpx2` in `fastapi.testclient`) —
   non-blocking, tracked since M0.
 
 ## Next recommended task
 
-**M3 — Host Authentication** — host registration/login with email/password,
-password hashing, authentication tokens/cookies, logout, and protected host
-endpoints (see `plan.md` §M3 and `docs/PRODUCT_SPEC.md` §2/§5.1).
+**M4 — Karaoke Session Creation** — host-owned sessions with join codes; the
+`get_current_host` dependency from M3 is the authorization seam. See `plan.md`
+§M4 (session fields/statuses, create/get/start/end, unique join code, join URL)
+and `docs/PRODUCT_SPEC.md` §3/§5.

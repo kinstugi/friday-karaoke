@@ -249,9 +249,46 @@ These freeze MVP product behavior. They were captured in `docs/PRODUCT_SPEC.md`.
 
 ---
 
+## M3 host-auth decisions
+
+## D25. Opaque database-backed bearer tokens (hashed at rest)
+
+- **Status:** Accepted
+- **Decision:** Hosts authenticate with email/password. Successful login issues an
+  opaque random bearer token (`secrets.token_urlsafe`), returned to the client once
+  in the login response and sent as `Authorization: Bearer <token>`. Only a SHA-256
+  digest of the token is stored (`host_auth_tokens`); the raw token is never
+  persisted. Tokens expire (default 30 days, `KARAOKE_AUTH_TOKEN_TTL_DAYS`) and
+  logout revokes them by deleting the row. Passwords are bcrypt-hashed
+  (`app.core.security`). Emails are stored lowercase; the unique constraint gives
+  case-insensitive uniqueness.
+- **Rationale:** A real logout and per-token revocation require server-side token
+  state; PostgreSQL is already the source of truth (D2). Hashing tokens at rest
+  means a database leak does not leak usable credentials. Opaque tokens avoid JWT
+  signing-secret management and avoid cookies/CSRF surface in the SPA.
+- **Rejected:** JWT (revocation needs a blacklist; signing secret management);
+  cookie-based sessions (CSRF considerations, extra cookie handling, no benefit
+  here); storing raw tokens in the database (usable on leak); school SSO (no
+  identity provider available at the school for v1).
+
+## D26. API base path confirmed: `/api/v1`
+
+- **Status:** Accepted
+- **Decision:** Business endpoints live under `/api/v1` (e.g.
+  `/api/v1/auth/host/...`). The liveness/readiness endpoints stay at the root
+  (`/`, `/health`, `/health/ready`) as they did in M0/M2.
+- **Rationale:** `API_CONTRACT.md` deferred the base-path decision to "the first
+  real endpoint". M3 is that milestone; a versioned prefix keeps future breaking
+  changes manageable without touching operational health checks.
+- **Rejected:** Putting auth endpoints at the root alongside the health checks
+  (mixed namespacing); `/api` without a version (no upgrade path).
+
+---
+
 ## Open questions (tracked)
 
-- Authentication mechanism for hosts (email/password vs. school SSO) — M3.
+- ~~Authentication mechanism for hosts (email/password vs. school SSO)~~ — **M3
+  resolved: email/password + opaque bearer tokens (D25).**
 - YouTube metadata source (oEmbed vs. Data API key) — M6.
 - Exact realtime payload schemas — M10.
 - Web Push service choice — M15.

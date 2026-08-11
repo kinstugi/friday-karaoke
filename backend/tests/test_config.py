@@ -17,12 +17,14 @@ def test_settings_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
         "KARAOKE_DATABASE_URL",
         "postgresql+asyncpg://karaoke:karaoke@localhost:5432/karaoke",
     )
+    monkeypatch.setenv("KARAOKE_AUTH_TOKEN_TTL_DAYS", "30")
     settings = Settings()
     assert settings.app_name == "Friday Karaoke API"
     assert settings.environment == "development"
     assert settings.log_level == "INFO"
     assert settings.debug is False
     assert settings.database_url.startswith("postgresql+asyncpg://")
+    assert settings.auth_token_ttl_days == 30
 
 
 def test_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:

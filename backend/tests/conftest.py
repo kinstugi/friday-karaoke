@@ -24,8 +24,23 @@ os.environ["KARAOKE_LOG_LEVEL"] = "WARNING"
 os.environ["KARAOKE_DATABASE_URL"] = "sqlite+aiosqlite://"
 os.environ["KARAOKE_DEBUG"] = "false"
 
-from app.core.database import SessionFactory  # noqa: E402
+from app.core.database import SessionFactory, engine  # noqa: E402
 from app.main import app  # noqa: E402
+from app.models import Base  # noqa: E402
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _create_schema() -> AsyncIterator[None]:
+    """Recreate all tables before every test for isolation.
+
+    The test engine uses a single in-memory SQLite database (static pool), so
+    dropping and recreating the schema per test keeps tests independent while
+    exercising the real ORM models.
+    """
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+        await conn.run_sync(Base.metadata.create_all)
+    yield
 
 
 @pytest.fixture

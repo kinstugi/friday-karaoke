@@ -1,10 +1,11 @@
 """SQLAlchemy ORM models.
 
-M2 note: no domain models exist yet. The first models arrive with M4
-(sessions) and M5 (participants); they must subclass ``Base`` and be imported
-here so Alembic autogenerate can discover them.
+Every domain model subclasses ``Base`` and is imported here so Alembic
+autogenerate and the test schema fixtures can discover it.
 """
 
 from app.models.base import Base
+from app.models.host import Host
+from app.models.host_auth_token import HostAuthToken
 
-__all__ = ["Base"]
+__all__ = ["Base", "Host", "HostAuthToken"]

@@ -51,37 +51,45 @@ the intended target state for v1.
 
 ## 3. Backend structure
 
-Layout (implemented at M2: packages exist; `domain/`, `services/`, and
-`repositories/` are placeholders filled from M4 onward):
+Layout (implemented at M2: packages exist; `domain/` and `repositories/` are
+placeholders; `services/` gained its first real use-case at M3 — host auth):
 
 ```text
 backend/
     app/
-        api/          # HTTP + WebSocket endpoints/routers (health router at M2)
-        core/         # config (Pydantic Settings), structured logging, database
+        api/          # HTTP + WebSocket endpoints/routers (health router M2, auth router M3)
+        core/         # config (Pydantic Settings), structured logging, database, security
         domain/       # domain models, enums, business rules, state machines (M4+)
-        services/     # application use-cases / orchestration (M4+)
+        services/     # application use-cases / orchestration (host auth M3; sessions M4+)
         repositories/ # persistence access (SQLAlchemy) (M4+)
-        models/       # SQLAlchemy ORM models (Base at M2; domain tables M4+)
-        schemas/      # Pydantic API schemas (health schemas at M2)
+        models/       # SQLAlchemy ORM models (Base, Host, HostAuthToken; more M4+)
+        schemas/      # Pydantic API schemas (health M2; auth M3)
         main.py       # FastAPI app factory / entry point
     tests/            # pytest suite (self-contained: in-memory SQLite)
-    alembic/          # migrations (async env; initial empty revision at M2)
+    alembic/          # migrations (async env; 0001 initial, 0002 host auth)
     alembic.ini
 ```
 
-Implementation status at M2:
+Implementation status at M3:
 
 - **Configuration:** Pydantic Settings (`app/core/config.py`), env prefix
-  `KARAOKE_`, `.env` file support, cached singleton via `get_settings()`.
+  `KARAOKE_`, `.env` file support, cached singleton via `get_settings()`. Auth
+  token lifetime configurable via `KARAOKE_AUTH_TOKEN_TTL_DAYS` (default 30).
 - **Database:** async SQLAlchemy engine + session factory + `get_session`
   dependency (`app/core/database.py`); PostgreSQL via `asyncpg`, in-memory SQLite
-  for tests.
-- **Logging:** structured JSON to stdout, stdlib-based (`app/core/logging.py`).
-- **Endpoints:** `/` (identity), `/health` (liveness), `/health/ready` (readiness,
-  probes the database and returns 503 when it is unreachable).
-- **Migrations:** Alembic with an async env wired to application settings; the
-  initial revision anchors the chain (no tables until M4+ models exist).
+  for tests. Models: `Host` and `HostAuthToken` (UUID primary keys via
+  `sqlalchemy.Uuid`, dialect-safe on both PostgreSQL and SQLite).
+- **Security:** bcrypt password hashing, opaque bearer token generation, SHA-256
+  token digesting (`app/core/security.py`).
+- **Services:** `HostAuthService` (`app/services/host_auth.py`) — register, login
+  (issues a revocable token), logout (revokes), and token-based host lookup.
+- **API:** health endpoints unchanged; host auth endpoints under `/api/v1/auth/host`
+  (register/login/logout/me). `get_current_host` dependency
+  (`app/api/dependencies.py`) enforces `Authorization: Bearer <token>` on host
+  endpoints. Business endpoints use the `/api/v1` base path (D26); health stays at
+  the root.
+- **Migrations:** Alembic async env wired to application settings; revisions
+  `0001_initial` (empty anchor) and `0002_host_auth` (hosts + host_auth_tokens).
 
 Rules:
 
@@ -154,7 +162,10 @@ get correct state from the API.
 - **M2** — backend skeleton (complete): FastAPI app factory, async SQLAlchemy 2.x +
   asyncpg, PostgreSQL, Alembic, Pydantic Settings, structured JSON logging,
   readiness health endpoint, project layers.
-- **M3–M9** — vertical slice: auth, sessions, join flow, YouTube metadata, queue,
+- **M3** — host authentication (complete): email/password registration/login,
+  bcrypt password hashing, opaque revocable bearer tokens (hashed at rest), logout,
+  `/api/v1` base path confirmed, `Host` + `HostAuthToken` tables.
+- **M4–M9** — vertical slice: sessions, join flow, YouTube metadata, queue,
   participant UI, host dashboard.
 - **M10–M16** — realtime + playback + rounds + notifications.
 - **M17–M19** — security, testing, PWA/mobile UX.
