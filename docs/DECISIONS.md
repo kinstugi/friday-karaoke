@@ -395,10 +395,48 @@ These freeze MVP product behavior. They were captured in `docs/PRODUCT_SPEC.md`.
 
 ---
 
+## M6 YouTube-metadata decisions
+
+## D33. Metadata source: YouTube Data API v3 (not oEmbed)
+
+- **Status:** Accepted
+- **Decision:** Song previews fetch metadata (title, channel, duration,
+  thumbnail) from the **YouTube Data API v3**
+  (`videos?part=snippet,contentDetails`) using `KARAOKE_YOUTUBE_API_KEY`. The
+  key is required for real use; when it is unset the preview endpoint returns
+  503 with a clear message. The fetch is injected with an `httpx.AsyncClient`
+  so the test suite uses a mock transport (no network, no key).
+- **Rationale:** The preview and the long-video warning (D34) require
+  **duration**, which the keyless oEmbed endpoint does not provide. The Data
+  API is Google's sanctioned, stable interface — no scraping the watch page.
+  The API key is a one-time free Google Cloud setup and was already anticipated
+  for deployment (PROJECT_BRAIN §M20 "YouTube API credentials if required").
+- **Rejected:** oEmbed alone (no duration — cannot warn on long videos or show
+  durations on the host dashboard); watch-page scraping (fragile, against the
+  spirit of a maintained contract); a third-party oEmbed proxy (same duration
+  gap, adds an external dependency).
+
+## D34. Long-video warning threshold (configurable, never a rejection)
+
+- **Status:** Accepted
+- **Decision:** A video longer than `KARAOKE_YOUTUBE_LONG_VIDEO_SECONDS`
+  (default 600 s = 10 min) gets `is_long: true` and a human-readable warning in
+  the preview. The video is **never** rejected for length (rule B6, D7).
+- **Rationale:** Karaoke tracks are typically a few minutes; a 10+ minute video
+  is usually not a karaoke track, but the host has final authority (D3) and may
+  accept it (e.g., a longer version). Making the threshold configurable avoids
+  re-deploys when the school decides what "unusual" means.
+- **Rejected:** Hard-coding a threshold (must re-deploy to change); auto-rejecting
+  long videos (violates B6); warning only above a much larger fixed value (e.g.,
+  30 min) which would miss 12-minute non-tracks.
+
+---
+
 ## Open questions (tracked)
 
 - ~~Authentication mechanism for hosts (email/password vs. school SSO)~~ — **M3
   resolved: email/password + opaque bearer tokens (D25).**
-- YouTube metadata source (oEmbed vs. Data API key) — M6.
+- ~~YouTube metadata source (oEmbed vs. Data API key)~~ — **M6 resolved:
+  YouTube Data API v3 (D33).**
 - Exact realtime payload schemas — M10.
 - Web Push service choice — M15.

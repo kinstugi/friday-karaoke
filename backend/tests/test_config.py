@@ -19,6 +19,8 @@ def test_settings_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setenv("KARAOKE_AUTH_TOKEN_TTL_DAYS", "30")
     monkeypatch.setenv("KARAOKE_PUBLIC_BASE_URL", "http://localhost:5173")
+    monkeypatch.setenv("KARAOKE_YOUTUBE_API_KEY", "")
+    monkeypatch.setenv("KARAOKE_YOUTUBE_LONG_VIDEO_SECONDS", "600")
     settings = Settings()
     assert settings.app_name == "Friday Karaoke API"
     assert settings.environment == "development"
@@ -27,6 +29,8 @@ def test_settings_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.database_url.startswith("postgresql+asyncpg://")
     assert settings.auth_token_ttl_days == 30
     assert settings.public_base_url == "http://localhost:5173"
+    assert settings.youtube_api_key == ""
+    assert settings.youtube_long_video_seconds == 600
 
 
 def test_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:

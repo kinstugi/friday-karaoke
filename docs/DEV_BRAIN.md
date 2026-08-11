@@ -7,106 +7,103 @@ of every milestone. The persistent context lives in `PROJECT_BRAIN.md`.
 
 ## Current milestone
 
-**M5 — Public QR Join Flow** — COMPLETE (verified).
+**M6 — YouTube URL Submission + Metadata** — COMPLETE (verified).
 
 ## Current task
 
-None (milestone finished). Next milestone: **M6 — YouTube URL Submission + Metadata**.
+None (milestone finished). Next milestone: **M7 — Queue Management**.
 
-## M5 scope (plan.md §M5)
+## M6 scope (plan.md §M6)
 
-- Public session lookup by join code (no auth).
-- Participant registration by nickname (no account).
-- Anonymous participant identity + secure opaque participant token.
-- QR code generation/display (generation server-side; display is M9).
+- Validate a YouTube URL (watch + youtu.be) and extract the video ID.
+- Fetch metadata (title, channel, duration, thumbnail).
+- Return a preview with a warning for unusually long videos (never reject).
 
-## Verification results (M5 acceptance criteria, plan.md §M5)
+## Verification results (M6 acceptance criteria, plan.md §M6)
 
 | Acceptance criterion | Result |
 | -------------------- | ------ |
-| A student scans the QR code and reaches the correct session | Verified end-to-end: the QR endpoint (`GET /api/v1/sessions/{id}/qr`) returns an SVG encoding the session's join URL (byte-verified against a re-rendered segno reference, `test_qr_returns_svg_for_owner`); scanning that URL leads to `GET /api/v1/join/{code}`, which returns the correct session snapshot, and `POST /api/v1/join/{code}/participants` registers the student by nickname (`test_lookup_returns_public_snapshot`, `test_register_returns_token_session_and_participant`). |
+| Participant pastes a valid YouTube URL and sees a preview before joining | Verified — `POST /api/v1/sessions/{id}/entries/preview` (participant token) returns canonical URL, video id, title, channel, duration, thumbnail plus `is_long`/`warning` (`test_preview_returns_metadata`, `test_preview_long_video_warns_but_is_not_rejected`). Long videos warn but are never rejected (B6/D34). |
 
 Extra verification performed:
 
-- Join lookup is public (200 without any token) and case-insensitive
-  (`test_lookup_requires_no_authentication`, `test_lookup_is_case_insensitive`).
-- Nickname rules B14/D16: trimmed, 1-20 chars, case-insensitive uniqueness per
-  session; duplicates → 409, blank/overlong → 422, display case preserved,
-  normalized copy stored (`test_register_*`).
-- Ended sessions: lookup still returns the snapshot (status ENDED) so the UI can
-  show "this karaoke night has ended"; registration is rejected with 409
-  (`test_lookup_ended_session_still_returns_snapshot`,
-  `test_register_ended_session_conflicts`).
-- Token hygiene: participant token is opaque, stored only as SHA-256 digest
-  (`test_register_token_is_stored_hashed`).
-- `alembic check`: no drift; migration `0004_participants` upgrade →
-  downgrade → upgrade verified on SQLite.
-- `uv run pytest`: 85 passed (21 new: 17 join + 4 QR). `uv run pyright`:
+- URL validation: watch (`youtube.com`, `m.`, `music.`), youtu.be, embed, shorts
+  all extract the 11-char ID; 15 invalid cases rejected (parametrized
+  `test_extract_video_id_*`).
+- Metadata source is the YouTube Data API v3 (D33); the fetch is tested with an
+  `httpx.MockTransport` (no network): parsing, empty items → unavailable, HTTP
+  error → unavailable, missing title → unavailable, missing API key →
+  configuration error (`tests/test_youtube.py`).
+- Endpoint guards: 401 without/with invalid participant token, 404 for another
+  session's participant or unknown session, 409 for ended sessions, 422 for
+  malformed URLs (E3), 404 for unavailable videos (E4), 503 when the API key is
+  unset.
+- `uv run pytest`: 129 passed (46 new: 37 unit + 9 endpoint). `uv run pyright`:
   0 errors, 0 warnings.
-- Health, host auth, and session endpoints unchanged and still green.
+- Health, host auth, sessions, join endpoints unchanged and still green.
 
-## Files changed (M5)
+## Files changed (M6)
 
 ```text
-backend/pyproject.toml                (deps: segno for QR generation)
+backend/pyproject.toml                (httpx moved to runtime deps)
 backend/uv.lock                       (updated)
-backend/app/models/participant.py     (new — Participant ORM model)
-backend/app/models/__init__.py        (+ Participant)
-backend/app/schemas/participant.py    (new — join/participant schemas)
-backend/app/services/participant.py   (new — ParticipantService: lookup + register)
-backend/app/api/routes/join.py        (new — /api/v1/join router)
-backend/app/api/routes/sessions.py    (+ GET /{id}/qr SVG QR endpoint)
-backend/app/main.py                   (include join router)
-backend/alembic/versions/0004_participants.py (new — participants table)
-backend/tests/test_join.py            (new — 17 join-flow tests)
-backend/tests/test_sessions.py        (+ 4 QR tests)
-docs/API_CONTRACT.md                  (§3 QR endpoint; §4 public join implemented)
-docs/DECISIONS.md                     (D31 participant identity, D32 server-side QR)
+backend/app/core/config.py            (+ youtube_api_key, youtube_long_video_seconds)
+backend/.env.example                  (+ KARAOKE_YOUTUBE_API_KEY, KARAOKE_YOUTUBE_LONG_VIDEO_SECONDS)
+backend/app/schemas/youtube.py        (new — SongPreviewRequest/Response, YouTubeVideoData)
+backend/app/services/youtube.py       (new — extract_video_id, duration parsing, Data API fetch)
+backend/app/services/participant.py   (+ get_by_token)
+backend/app/services/session.py       (+ get_by_id)
+backend/app/api/dependencies.py       (+ get_current_participant)
+backend/app/api/routes/entries.py     (new — POST .../entries/preview)
+backend/app/main.py                   (include entries router)
+backend/tests/test_youtube.py         (new — 30 unit tests)
+backend/tests/test_entries.py         (new — 14 endpoint tests)
+backend/tests/test_config.py          (pin new settings defaults)
+docs/API_CONTRACT.md                  (§5 preview implemented)
+docs/DECISIONS.md                     (D33 Data API v3, D34 long-video threshold; open Q resolved)
 docs/ARCHITECTURE.md                  (§3 implementation status, §7 phases)
 docs/PROJECT_BRAIN.md                 (milestones, limitations, decisions)
 docs/DEV_BRAIN.md                     (updated, this file)
-docs/RUNBOOK.md                       (M5 checklist + join smoke test)
+docs/RUNBOOK.md                       (M6 checklist + preview smoke test)
 ```
 
-## Implementation notes (M5)
+## Implementation notes (M6)
 
-- **Public by design:** the join endpoints carry no auth dependency. Anyone with
-  the join code can look up a session and register (B2/D6); the QR encodes the
-  public join URL so this surface is intentional.
-- **Participant identity (D31):** `participants` stores `nickname` (display case
-  preserved) + `nickname_lower` (lowercased) with a `(session_id,
-  nickname_lower)` unique constraint for portable case-insensitive uniqueness.
-  The opaque token reuses the M3 helpers (`generate_auth_token` /
-  `hash_auth_token` from `app.core.security`) and is stored as a SHA-256 digest.
-- **Nickname validation:** Pydantic enforces 1-20 on raw input; the service then
-  trims and re-checks (blank-after-trim → 422). Duplicate (case-insensitive,
-  including a lost unique-constraint race) → 409.
-- **Ended sessions (E18):** `GET /join/{code}` returns the snapshot with
-  `status: ENDED` (the join screen renders the "ended" message); registration
-  raises `SessionEndedError` → 409.
-- **QR (D32):** `GET /api/v1/sessions/{id}/qr` (owning host only) renders the
-  join URL as an SVG via `segno` (`error="m"`, `scale=4`), deterministic output.
-  Display on the projector is the host dashboard's job (M9).
-- **Join code lookup:** normalized with `.strip().upper()` — D27 codes are
-  uppercase from an unambiguous alphabet, so typed lowercase still works.
-- **Repositories:** still a placeholder; services use the database session
-  directly (consistent with M3/M4).
-- **FastAPI D30 rule respected:** new endpoints are named `lookup_session`,
-  `register_participant`, `session_qr` — none collide with the `get_session` /
-  `get_current_host` dependency names.
+- **Metadata source (D33):** YouTube Data API v3
+  (`videos?part=snippet,contentDetails`). The oEmbed endpoint was rejected
+  because it has no duration field. `KARAOKE_YOUTUBE_API_KEY` is required for
+  real use; unset → 503. The `fetch_video_metadata` method accepts an optional
+  `httpx.AsyncClient` so tests inject a `MockTransport` (no key, no network).
+- **URL validation:** `extract_video_id` supports `watch?v=`, youtu.be, embed,
+  and shorts; rejects non-http(s) schemes, non-YouTube hosts, missing/malformed
+  IDs. Returns the canonical watch URL in the response.
+- **Duration:** `parse_iso_duration` converts `PT#H#M#S` to seconds;
+  `format_duration` renders `m:ss`/`h:mm:ss` for the warning text.
+- **Long-video warning (D34):** `is_long = duration_seconds >
+  KARAOKE_YOUTUBE_LONG_VIDEO_SECONDS` (default 600 s); the warning is advisory
+  only — the preview always returns 200 for fetchable videos.
+- **Participant auth:** new `get_current_participant` dependency resolves the
+  participant from the M5 opaque token; endpoints additionally enforce the
+  participant's session binding (mismatch → 404, no existence leak) and the
+  ended-session guard (409).
+- **Preview is stateless:** nothing is persisted until the queue entry lands in
+  M7 (no `YouTubeVideo` table yet). The response shape matches the fields M7
+  will store.
+- **FastAPI D30 rule respected:** the new endpoint is named `preview_song`; no
+  `__name__` collision with the `get_session`/`get_current_participant`
+  dependencies.
 
-## Tests added (M5)
+## Tests added (M6)
 
-- `tests/test_join.py` — 17 tests: public lookup (no auth, snapshot shape,
-  unknown code 404, case-insensitive, ended session still returned), registration
-  (no auth, token+session+participant shape, unknown code 404, ended 409, blank
-  nickname 422, overlong nickname 422, case-insensitive duplicate 409, same
-  nickname in different sessions OK, trim), persistence/hygiene (row persisted
-  with normalized nickname, token stored hashed, participant belongs to session).
-- `tests/test_sessions.py` — 4 QR tests: auth required (401), SVG matches a
-  re-rendered segno reference of the join URL, another host 404, unknown session
-  404.
-- **85 passed** total (was 64 at M4).
+- `tests/test_youtube.py` — 37 unit tests: 10 supported URL shapes + 12 invalid
+  shapes for `extract_video_id` (parametrized), `parse_iso_duration` (7 cases),
+  `format_duration`, and 7 Data API fetch tests via `httpx.MockTransport`
+  (success parsing, missing key, empty items, HTTP error, missing title,
+  transport error, non-JSON body).
+- `tests/test_entries.py` — 9 endpoint tests: auth required, cross-session
+  404, unknown session 404, ended session 409, invalid URL 422, metadata 200,
+  long-video warning, unavailable video 404, unconfigured service 503.
+- **129 passed** total (was 85 at M5).
 
 ## Current blockers
 
@@ -114,8 +111,8 @@ docs/RUNBOOK.md                       (M5 checklist + join smoke test)
 
 ## Unresolved technical questions
 
-- Tracked in `docs/DECISIONS.md` (Open questions): YouTube metadata source (M6),
-  realtime payload schemas (M10), Web Push (M15).
+- Tracked in `docs/DECISIONS.md` (Open questions): realtime payload schemas
+  (M10), Web Push (M15).
 - Starlette deprecation warning (`httpx` vs `httpx2` in `fastapi.testclient`) —
   non-blocking, tracked since M0.
 - FastAPI 0.141.1 dependency-name collision (D30): workaround documented; watch
@@ -123,8 +120,8 @@ docs/RUNBOOK.md                       (M5 checklist + join smoke test)
 
 ## Next recommended task
 
-**M6 — YouTube URL Submission + Metadata** — public preview endpoint that
-validates a YouTube URL (watch + youtu.be), extracts the video ID, and returns
-metadata (title, channel, duration, thumbnail) with a warning for unusually long
-videos (never auto-reject). The participant token from M5 authorizes it. See
-`plan.md` §M6 and `docs/PRODUCT_SPEC.md` §6.3-6.4 / §8 E3-E4.
+**M7 — Queue Management** — the authoritative queue engine: `QueueEntry` +
+`YouTubeVideo` tables, `POST /sessions/{id}/entries` (submit, with the M6
+preview data), public queue snapshot with computed positions (D8, no mutable
+position field), participant cancel of own WAITING entry, host remove/edit.
+See `plan.md` §M7 and `docs/PRODUCT_SPEC.md` §6.5-6.6 / §9 B3-B7, D15-D17.

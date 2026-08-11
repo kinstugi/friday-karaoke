@@ -87,6 +87,20 @@ class SessionService:
         await session.refresh(karaoke)
         return karaoke
 
+    async def get_by_id(
+        self, session: AsyncSession, session_id: uuid.UUID
+    ) -> Session:
+        """Return a session by id regardless of host (used by public flows).
+
+        Raises ``SessionNotFoundError`` when the session does not exist.
+        """
+        karaoke = await session.scalar(
+            select(Session).where(Session.id == session_id)
+        )
+        if karaoke is None:
+            raise SessionNotFoundError(session_id)
+        return karaoke
+
     async def get_for_host(
         self, session: AsyncSession, host_id: uuid.UUID, session_id: uuid.UUID
     ) -> Session:

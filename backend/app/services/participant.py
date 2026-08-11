@@ -52,6 +52,19 @@ def _normalize_nickname(nickname: str) -> str:
 class ParticipantService:
     """Application service for the public join flow."""
 
+    async def get_by_token(
+        self, session: AsyncSession, raw_token: str
+    ) -> Participant | None:
+        """Return the participant owning ``raw_token``, or None if unknown.
+
+        Used by the ``get_current_participant`` dependency (M6+).
+        """
+        return await session.scalar(
+            select(Participant).where(
+                Participant.token_hash == hash_auth_token(raw_token)
+            )
+        )
+
     async def get_session_for_join(
         self, session: AsyncSession, join_code: str
     ) -> Session:

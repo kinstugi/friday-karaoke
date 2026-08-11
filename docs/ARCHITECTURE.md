@@ -58,26 +58,27 @@ placeholders; `services/` gained its first real use-case at M3 — host auth;
 ```text
 backend/
     app/
-        api/          # HTTP + WebSocket endpoints/routers (health M2, auth M3, sessions M4, join M5)
+        api/          # HTTP + WebSocket endpoints/routers (health M2, auth M3, sessions M4, join M5, entries M6)
         core/         # config (Pydantic Settings), structured logging, database, security
         domain/       # domain models, enums, business rules, state machines (SessionStatus M4)
-        services/     # application use-cases / orchestration (host auth M3, sessions M4, join M5)
-        repositories/ # persistence access (SQLAlchemy) (deferred until M4+ shared)
+        services/     # use-cases (host auth M3, sessions M4, join M5, youtube metadata M6)
+        repositories/ # persistence access (SQLAlchemy) (deferred until shared)
         models/       # SQLAlchemy ORM models (Base, Host, HostAuthToken, Session, Participant)
-        schemas/      # Pydantic API schemas (health M2; auth M3; sessions M4; join M5)
+        schemas/      # Pydantic API schemas (health M2; auth M3; sessions M4; join M5; youtube M6)
         main.py       # FastAPI app factory / entry point
     tests/            # pytest suite (self-contained: in-memory SQLite)
     alembic/          # migrations (async env; 0001..0004)
     alembic.ini
 ```
 
-Implementation status at M5:
+Implementation status at M6:
 
 - **Configuration:** Pydantic Settings (`app/core/config.py`), env prefix
   `KARAOKE_`, `.env` file support, cached singleton via `get_settings()`. Auth
   token lifetime via `KARAOKE_AUTH_TOKEN_TTL_DAYS` (default 30, M3). Public
   frontend base URL via `KARAOKE_PUBLIC_BASE_URL` (default `http://localhost:5173`,
-  M4) used to derive session join URLs.
+  M4). YouTube Data API key via `KARAOKE_YOUTUBE_API_KEY` and long-video warning
+  threshold via `KARAOKE_YOUTUBE_LONG_VIDEO_SECONDS` (default 600, M6).
 - **Database:** async SQLAlchemy engine + session factory + `get_session`
   dependency (`app/core/database.py`); PostgreSQL via `asyncpg`, in-memory SQLite
   for tests. Models: `Host`, `HostAuthToken` (M3), `Session` (M4), `Participant`
@@ -91,14 +92,16 @@ Implementation status at M5:
   `CREATED -> ACTIVE <-> PAUSED -> ROUND_COMPLETE -> ENDED`; `ENDED` is terminal
   and reachable from any other state.
 - **Services:** `HostAuthService` (M3), `SessionService` (M4: create/get/start/
-  end, unique join codes), `ParticipantService` (M5: public session lookup by
-  join code, participant registration with nickname rules + opaque token).
+  end, unique join codes), `ParticipantService` (M5: public session lookup,
+  participant registration, token lookup), `YouTubeService` (M6: Data API v3
+  metadata fetch, URL validation, duration parsing).
 - **API:** health at root; host auth under `/api/v1/auth/host` (M3); sessions
-  under `/api/v1/sessions` (create/get/start/end + SVG QR of the join URL, M4/M5);
-  public join under `/api/v1/join` (lookup + register participant, M5).
-  `get_current_host` dependency enforces `Authorization: Bearer <token>` on host
-  endpoints; session ownership is enforced in the service (cross-host → 404, D29).
-  Business endpoints use the `/api/v1` base path (D26); health stays at the root.
+  under `/api/v1/sessions` (create/get/start/end + SVG QR, M4/M5); public join
+  under `/api/v1/join` (M5); participant preview under
+  `/api/v1/sessions/{id}/entries/preview` (M6). `get_current_host` and
+  `get_current_participant` dependencies enforce bearer tokens; ownership/session
+  binding is enforced in services/endpoints (cross-owner → 404, D29). Business
+  endpoints use the `/api/v1` base path (D26); health stays at the root.
 - **Migrations:** Alembic async env wired to application settings; revisions
   `0001_initial`, `0002_host_auth`, `0003_sessions`, `0004_participants`.
   `alembic check` reports no drift.
@@ -183,7 +186,10 @@ get correct state from the API.
 - **M5** — public QR join flow (complete): public session lookup by join code,
   participant registration (nickname + opaque token), server-side SVG QR of the
   join URL, `Participant` table.
-- **M6–M9** — vertical slice: YouTube metadata, queue,
+- **M6** — YouTube URL submission + metadata (complete): preview endpoint with
+  URL validation, YouTube Data API v3 metadata fetch, configurable long-video
+  warnings.
+- **M7–M9** — vertical slice: queue engine,
   participant UI, host dashboard.
 - **M10–M16** — realtime + playback + rounds + notifications.
 - **M17–M19** — security, testing, PWA/mobile UX.

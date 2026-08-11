@@ -165,11 +165,19 @@ limit, sessions not tied to a browser) are in `docs/PRODUCT_SPEC.md` §8–§9 a
 
 ## 8. Current milestone
 
-**M6 — YouTube URL Submission + Metadata** (next). M5 is complete; see
-`docs/DEV_BRAIN.md` for live status.
+**M7 — Queue Management** (next). M6 is complete; see `docs/DEV_BRAIN.md` for
+live status.
 
 ## 9. Completed milestones
 
+- **M6 — YouTube URL Submission + Metadata** (complete): `POST
+  /api/v1/sessions/{id}/entries/preview` (participant token) validates YouTube
+  URLs (watch/youtu.be/embed/shorts), extracts the video ID, fetches metadata
+  (title/channel/duration/thumbnail) from the YouTube Data API v3 (D33,
+  `KARAOKE_YOUTUBE_API_KEY`), and returns a stateless preview with a
+  configurable long-video warning that never rejects (D34, B6). New
+  `get_current_participant` dependency; metadata decisions D33–D34 recorded in
+  `docs/DECISIONS.md`.
 - **M5 — Public QR Join Flow** (complete): public session lookup by join code
   (`GET /api/v1/join/{code}`, case-insensitive) and participant registration
   (`POST /api/v1/join/{code}/participants`) — no account, nickname rules
@@ -212,11 +220,14 @@ limit, sessions not tied to a browser) are in `docs/PRODUCT_SPEC.md` §8–§9 a
 
 ## 10. Known limitations
 
-- No song submission or queue yet (YouTube metadata M6, queue M7).
+- No queue yet (queue entries + persistence land in M7); the M6 preview is
+  stateless.
 - Only the `Host`, `HostAuthToken`, `Session`, and `Participant` domain tables
   exist (migration `0004`). PAUSED and ROUND_COMPLETE session states are defined
   but not reachable yet (M14/M16).
-- Participant tokens are issued at join but only start authorizing participant
+- Song previews require `KARAOKE_YOUTUBE_API_KEY` (YouTube Data API v3, D33);
+  without it the preview endpoint returns 503. Tests mock the HTTP call.
+- Participant tokens are issued at join but only authorize participant
   endpoints from M6 (preview) / M7 (queue).
 - Host bearer tokens are long-lived (30 days) unless logged out; fine for the
   pilot, token rotation/refresh is not in scope for v1.
@@ -255,6 +266,9 @@ See `docs/DECISIONS.md` for the full, maintained list. Highlights:
 - Public join (M5): participants are session-scoped identities with opaque tokens
   hashed at rest and case-insensitive per-session nickname uniqueness (D31); QR
   codes are generated server-side as SVG encoding the join URL (D32).
+- YouTube previews (M6): metadata comes from the YouTube Data API v3 with
+  `KARAOKE_YOUTUBE_API_KEY` (D33); long videos warn but are never auto-rejected,
+  threshold configurable via `KARAOKE_YOUTUBE_LONG_VIDEO_SECONDS` (D34).
 - No user-visible feature in M0 beyond a health check.
 
 ## 12. Commands for running / testing

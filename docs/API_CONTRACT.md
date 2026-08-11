@@ -207,12 +207,42 @@ and is served as an SVG at `GET /api/v1/sessions/{id}/qr` (owning host).
 
 | Method | Path                                     | Auth        | Description                              |
 | ------ | ---------------------------------------- | ----------- | ---------------------------------------- |
-| POST   | /sessions/{id}/entries/preview           | participant | Validate URL + return metadata preview   |
-| POST   | /sessions/{id}/entries                   | participant | Submit song (create queue entry)         |
-| GET    | /sessions/{id}/entries                   | none        | Queue snapshot (public, sanitized)       |
-| DELETE | /entries/{entryId}                       | participant | Cancel own WAITING entry                 |
-| PATCH  | /entries/{entryId}/video                 | host        | Host replaces the YouTube URL            |
-| DELETE | /entries/{entryId}                       | host        | Host removes any entry                   |
+| POST   | /api/v1/sessions/{id}/entries/preview    | participant | Validate URL + return metadata preview (M6 — IMPLEMENTED) |
+| POST   | /api/v1/sessions/{id}/entries            | participant | Submit song (create queue entry) (M7)    |
+| GET    | /api/v1/sessions/{id}/entries            | none        | Queue snapshot (public, sanitized) (M7)  |
+| DELETE | /entries/{entryId}                       | participant | Cancel own WAITING entry (M7)            |
+| PATCH  | /entries/{entryId}/video                 | host        | Host replaces the YouTube URL (M7)       |
+| DELETE | /entries/{entryId}                       | host        | Host removes any entry (M7)              |
+
+### Preview (M6) — IMPLEMENTED
+
+```text
+POST /api/v1/sessions/{id}/entries/preview   Authorization: Bearer <participant token>
+{ "youtube_url": "https://youtu.be/dQw4w9WgXcQ" }   # watch / youtu.be / embed / shorts
+
+200 {
+  "youtube_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",  # canonical
+  "video_id": "dQw4w9WgXcQ",
+  "title": "Rick Astley - Never Gonna Give You Up",
+  "channel": "Rick Astley",
+  "duration_seconds": 213,
+  "thumbnail_url": "https://i.ytimg.com/vi/medium.jpg",
+  "is_long": false,                      # true when > KARAOKE_YOUTUBE_LONG_VIDEO_SECONDS (D34)
+  "warning": null                        # "This video is unusually long (...)" when is_long
+}
+
+401 { "detail": "authentication required" }             # missing/invalid participant token
+404 { "detail": "session not found" }                    # unknown session or token from another session
+409 { "detail": "this karaoke night has ended" }         # ENDED sessions cannot preview
+422 { "detail": "that doesn't look like a valid YouTube link" }   # E3: malformed/non-YouTube URL
+404 { "detail": "we couldn't load this video" }          # E4: valid format, metadata unavailable
+503 { "detail": "KARAOKE_YOUTUBE_API_KEY is not configured" }    # service unconfigured (D33)
+```
+
+The preview is stateless (nothing persisted until M7). Metadata source is the
+YouTube Data API v3 (decision D33); long videos warn but are never rejected
+(rule B6, decision D34). The participant token must belong to the session in
+the path.
 
 Target request/response example:
 

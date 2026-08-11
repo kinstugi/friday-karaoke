@@ -94,7 +94,7 @@ npm run typecheck
 npm run lint
 ```
 
-## Verification checklist (M5)
+## Verification checklist (M6)
 
 ```bash
 # From the repo root
@@ -105,41 +105,40 @@ cd backend && uv sync && uv run alembic upgrade head
 uv run pytest && uv run pyright
 uv run uvicorn app.main:app --reload
 
-# Host auth smoke test (real PostgreSQL)
+# Host auth + session + participant smoke test (real PostgreSQL)
 curl -X POST http://localhost:8000/api/v1/auth/host/register \
   -H 'Content-Type: application/json' \
   -d '{"email":"host@school.edu","password":"correct-horse-battery"}'   # 201
 curl -X POST http://localhost:8000/api/v1/auth/host/login \
   -H 'Content-Type: application/json' \
   -d '{"email":"host@school.edu","password":"correct-horse-battery"}'
-#   -> 200 {"token": "...", "token_type": "bearer", "host": {...}}
 TOKEN=<token from the login response>
-
-# Session + join smoke test (real PostgreSQL)
 curl -X POST http://localhost:8000/api/v1/sessions \
-  -H "Authorization: Bearer $TOKEN" \
-  -H 'Content-Type: application/json' -d '{}'
-#   -> 201 {"id": "...", "join_code": "K7X3QP", "join_url": "http://localhost:5173/join/K7X3QP", ...}
-SESSION_ID=<id from the create response>
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{}'
 JOIN_CODE=<join_code from the create response>
-curl http://localhost:8000/api/v1/sessions/$SESSION_ID/qr -H "Authorization: Bearer $TOKEN" -o /tmp/join-qr.svg   # SVG QR of the join URL
-curl http://localhost:8000/api/v1/join/$JOIN_CODE                     # 200 session snapshot (no auth)
+SESSION_ID=<id from the create response>
 curl -X POST http://localhost:8000/api/v1/join/$JOIN_CODE/participants \
-  -H 'Content-Type: application/json' -d '{"nickname":"Emma"}'        # 201 token + session + participant
-curl -X POST http://localhost:8000/api/v1/join/$JOIN_CODE/participants \
-  -H 'Content-Type: application/json' -d '{"nickname":"emma"}'        # 409 already taken
-curl http://localhost:8000/api/v1/join/ZZZZZZ                         # 404
+  -H 'Content-Type: application/json' -d '{"nickname":"Emma"}'
+PTOKEN=<participant token from the join response>
 
-# Frontend (unchanged by M5)
+# Preview smoke test (needs KARAOKE_YOUTUBE_API_KEY in backend/.env)
+curl -X POST http://localhost:8000/api/v1/sessions/$SESSION_ID/entries/preview \
+  -H "Authorization: Bearer $PTOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"youtube_url":"https://youtu.be/dQw4w9WgXcQ"}'
+#   -> 200 {video_id, title, channel, duration_seconds, thumbnail_url, is_long, warning}
+# Without a participant token: 401. Garbage URL: 422. Unavailable video: 404.
+
+# Frontend (unchanged by M6)
 cd ../frontend && npm install && npm run build && npm run typecheck
 ```
 
-This satisfies the M5 acceptance criteria: a student scans the QR (SVG generated
-by the backend, encoding the join URL), reaches the session via the public join
-endpoint, and registers a nickname without an account, receiving an opaque
-participant token. Nickname rules (trimmed, 1-20 chars, case-insensitive
-uniqueness) and the ended-session guard are enforced server-side. Health, host
-auth, and session endpoints from M2/M3/M4 are unchanged.
+This satisfies the M6 acceptance criteria: a participant pastes a valid YouTube
+URL and sees a preview (title/channel/duration/thumbnail) with a warning for
+unusually long videos — never a rejection. URL format validation (E3),
+unavailable-video handling (E4), participant token auth, session binding, and
+the ended-session guard are all enforced server-side. Health, host auth,
+sessions, and join endpoints from M2-M5 are unchanged.
 
 ## Branch / commit workflow
 

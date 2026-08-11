@@ -36,6 +36,12 @@ class Settings(BaseSettings):
     #: Public base URL of the frontend, used to build session join URLs (M4).
     #: Defaults to the Vite dev server; set to the deployed frontend in prod.
     public_base_url: str = "http://localhost:5173"
+    #: YouTube Data API v3 key for fetching song metadata (M6, decision D33).
+    #: Empty means the preview service is not configured (503).
+    youtube_api_key: str = ""
+    #: Threshold (seconds) above which a video preview carries a long-video
+    #: warning (M6, decision D34). Warnings never reject.
+    youtube_long_video_seconds: int = 600
 
 
 @lru_cache

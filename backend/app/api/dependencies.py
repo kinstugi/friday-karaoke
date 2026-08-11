@@ -1,4 +1,4 @@
-"""FastAPI dependencies shared by host-authenticated endpoints."""
+"""FastAPI dependencies shared by host- and participant-authenticated endpoints."""
 
 from typing import Annotated
 
@@ -8,7 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_session
 from app.models.host import Host
+from app.models.participant import Participant
 from app.services.host_auth import host_auth_service
+from app.services.participant import participant_service
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -38,3 +40,32 @@ async def get_current_host(
             headers={"WWW-Authenticate": "Bearer"},
         )
     return host
+
+
+async def get_current_participant(
+    credentials: Annotated[
+        HTTPAuthorizationCredentials | None, Depends(bearer_scheme)
+    ],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> Participant:
+    """Resolve the participant from their opaque token (M5 tokens, D31).
+
+    Raises HTTP 401 when the header is missing or the token is unknown.
+    Session binding is checked by the endpoints that need it (404 on mismatch).
+    """
+    if credentials is None or credentials.scheme.lower() != "bearer":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="authentication required",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    participant = await participant_service.get_by_token(
+        session, credentials.credentials
+    )
+    if participant is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return participant
