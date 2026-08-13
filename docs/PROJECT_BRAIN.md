@@ -84,6 +84,9 @@ Scan QR
 - Frontend is a React + TypeScript SPA (Vite). It never owns authoritative state.
 - Realtime delivery via **FastAPI WebSockets** (implemented M10). WebSockets are a delivery
   mechanism, **not** the source of truth; clients resync from the backend after reconnect.
+- **Queue rounds** (M10.1): the queue is round-robin — one song per participant per
+  round in a stable participant order, the active round is derived and auto-advances,
+  and there is no next-round enrollment (decisions D43–D45).
 - The **host's browser is the playback device** (YouTube embedded player).
   Participants' phones never play the song.
 
@@ -144,32 +147,47 @@ The normative, implementer-facing rules are in `docs/PRODUCT_SPEC.md` §9
 
 1. Only authenticated hosts can create/manage sessions.
 2. Anyone with the session QR/link can join. Participants need no account.
-3. Participants can cancel their own waiting entries; they cannot modify others'.
+3. Participants can cancel their own waiting entries (current or future rounds);
+   they cannot modify others'.
 4. Host has final authority over the queue (remove any entry, edit YouTube URLs, skip,
    pause/resume, advance manually, end the session).
 5. Invalid YouTube URLs cannot be queued. Long videos produce a **warning**, not a rejection.
-6. Queue order is determined by authoritative backend state (creation order), not a
-   mutable position field.
+6. Queue order is authoritative backend state: one song per participant per round,
+   in stable participant order, with a derived active round that auto-advances —
+   never a mutable position field (D43).
 7. Host playback is authoritative for actual song playback.
 8. Automatic advancement can always be overridden by the host.
-9. A session contains multiple rounds (do not create a new session per round).
-10. At round completion, participants are asked whether they want the next round.
-    Default answer is YES; an explicit NO excludes them from the next round.
+9. A session contains multiple rounds; rounds advance automatically, no next-round
+   enrollment (do not create a new session per round).
+10. A participant may queue up to 5 songs total (configurable); beyond the cap is
+    rejected. A participant with no songs left drops out of later rounds.
 11. Realtime events are not authoritative state. Reconnecting clients must resync.
 12. Host actions must be authorized server-side.
 13. The application must remain usable if realtime connections temporarily fail.
 
-Additional M1 decisions (duplicate songs allowed, nickname rules, active-entry
-limit, sessions not tied to a browser) are in `docs/PRODUCT_SPEC.md` §8–§9 and
-`docs/DECISIONS.md` D15–D20.
+Additional M1 decisions (duplicate songs allowed, nickname rules, per-participant
+song cap, sessions not tied to a browser) are in `docs/PRODUCT_SPEC.md` §8–§9 and
+`docs/DECISIONS.md` D15–D20 / D43–D45.
 
 ## 8. Current milestone
 
-**M11 — Playback state machine** (next; backend). M10 is complete; see
+**M11 — Playback state machine** (next; backend). M10.1 is complete; see
 `docs/DEV_BRAIN.md` for live status.
 
 ## 9. Completed milestones
 
+- **M10.1 — Queue rounds + auto-advance** (complete, backend + frontend): the
+  queue is round-robin — one song per participant per round, in stable
+  participant order (earliest first engagement), with the active round derived
+  (lowest-numbered round with a non-terminal entry) and auto-advancing when it
+  empties. `ROUND_COMPLETE` and the M16 enrollment prompt were removed
+  (participants opt out by cancelling remaining songs); the per-participant cap
+  is `KARAOKE_QUEUE_MAX_SONGS_PER_PARTICIPANT` (default 5, D45); the snapshot
+  gains `round_number`; a participant-scoped `GET /entries/mine` lists current +
+  upcoming songs. No schema migration (entries were already round-scoped). 9
+  new queue/round tests (suite 184); pyright 0; frontend round badge + "Your
+  songs" section; live smoke against Postgres + real YouTube metadata confirmed
+  round assignment, auto-advance, and positions.
 - **M10 — Realtime updates** (complete, backend + frontend): FastAPI WebSocket
   channel at `GET /api/v1/sessions/{id}/ws` with the bearer token in a `token`
   query param (browser WS cannot set headers); tokens must belong to the
@@ -268,18 +286,19 @@ limit, sessions not tied to a browser) are in `docs/PRODUCT_SPEC.md` §8–§9 a
 ## 10. Known limitations
 
 - No playback yet (M11/M12); queue entries stay WAITING — NEXT/SINGING statuses
-  exist but are not yet assigned. Rounds are created but the round lifecycle
-  (enrollment, next round) lands in M16.
+  exist but are not yet assigned. Rounds are round-robin since M10.1 (one song
+  per participant per round, auto-advance) but nothing assigns NEXT/SINGING yet.
 - The host dashboard's skip/finish/pause/resume buttons are disabled until the
   M11 playback state machine and its endpoints exist (D40).
 - Realtime (M10) delivers only the events whose producers exist: `QueueUpdated`
   (submit/cancel/remove/edit), `ParticipantJoined` (join), and `SessionUpdated`
-  (start/end). Singer/round/pause events arrive with their milestones
-  (M11/M13/M14/M16). The `RealtimeHub` is in-process/per-worker (D42): a
+  (start/end). Round events arrive with M10.1; singer/pause events with their
+  milestones (M11/M13/M14). The `RealtimeHub` is in-process/per-worker (D42): a
   multi-worker backend would need a shared hub (Redis) first (D9).
 - Only the Host/HostAuthToken/Session/Participant/YouTubeVideo/Round/QueueEntry
-  tables exist (migration `0005`). PAUSED and ROUND_COMPLETE session states are
-  defined but not reachable yet (M14/M16).
+  tables exist (migration `0005`). PAUSED is defined but not reachable yet
+  (M14). ROUND_COMPLETE was removed from the domain at M10.1 (rounds
+  auto-advance; no enrollment).
 - Song previews and submissions require `KARAOKE_YOUTUBE_API_KEY` (YouTube Data
   API v3, D33); without it those endpoints return 503. Tests mock the HTTP call.
 - Host bearer tokens are long-lived (30 days) unless logged out; fine for the
@@ -307,8 +326,8 @@ See `docs/DECISIONS.md` for the full, maintained list. Highlights:
 - Do not over-validate YouTube content (validate format, warn on length, never auto-reject).
 - Redis is not required for the first deployment.
 - MVP behavior is frozen in `docs/PRODUCT_SPEC.md` (M1): duplicates allowed,
-  nickname rules, active-entry limit, deterministic round ordering, sessions not
-  tied to a browser connection.
+  nickname rules, per-participant song cap (D45), round-robin queue ordering
+  (D43), sessions not tied to a browser connection.
 - Async SQLAlchemy + asyncpg; self-contained SQLite test suite; dev PostgreSQL via
   Docker Compose; stdlib JSON logging (M2, DECISIONS D21–D24).
 - Host auth: email/password + bcrypt, opaque revocable bearer tokens hashed at rest
@@ -342,6 +361,11 @@ See `docs/DECISIONS.md` for the full, maintained list. Highlights:
   per-worker `RealtimeHub` (no Redis, D9); typed per-event payloads in
   `app/schemas/realtime.py`; only events whose producers exist are emitted;
   clients re-fetch on reconnect (D5, D42).
+- Queue rounds (M10.1): the queue is round-robin — one song per participant per
+  round in a stable participant order (earliest first engagement), the active
+  round is derived and auto-advances, `ROUND_COMPLETE` and the next-round
+  enrollment prompt are removed, and the per-participant cap is a configurable
+  total of 5 (`KARAOKE_QUEUE_MAX_SONGS_PER_PARTICIPANT`) (D43–D45).
 - No user-visible feature in M0 beyond a health check.
 
 ## 12. Commands for running / testing

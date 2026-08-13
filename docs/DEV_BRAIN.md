@@ -7,100 +7,106 @@ of every milestone. The persistent context lives in `PROJECT_BRAIN.md`.
 
 ## Current milestone
 
-**M10 — Realtime updates** — COMPLETE (verified).
+**M10.1 — Queue rounds + auto-advance** — COMPLETE (verified).
 
 ## Current task
 
 None (milestone finished). Next milestone: **M11 — Playback state machine**
-(the backend determines exactly which singer/song is active; enables the
-dashboard's disabled skip/finish/pause/resume actions).
+(the backend determines exactly which singer/song is active: the first
+non-terminal entry of the current round; round boundaries are just another
+transition).
 
-## M10 scope (plan.md §M10)
+## M10.1 scope (plan.md §M10.1)
 
-- FastAPI WebSockets: one authenticated channel per session
-  (`GET /api/v1/sessions/{id}/ws`) with typed domain events.
-- Events are a delivery mechanism, never the source of truth (D5): reconnecting
-  clients re-fetch authoritative state.
-- Frontend: participant queue screen + host dashboard subscribe; fall back to
-  5 s snapshot polling while the socket is down (B13).
+Round-robin queue: one song per participant per round, stable participant order,
+rounds auto-advance, no next-round enrollment.
 
-## Verification results (M10 acceptance criteria, plan.md §M10)
+## Verification results (M10.1 acceptance criteria, plan.md §M10.1)
 
 | Acceptance criterion | Result |
 | -------------------- | ------ |
-| Queue changes reach connected clients almost immediately (host action → participant phone) | Verified — `QueueUpdated` (full authoritative snapshot) broadcast after submit/cancel/remove/edit; live smoke against PostgreSQL delivered `ParticipantJoined`, `SessionUpdated ACTIVE` and `SessionUpdated ENDED` over a real WebSocket |
-| WebSockets are delivery only; reconnecting clients re-fetch authoritative state | Verified — frontend `useRealtime` auto-reconnects, and both screens resume REST snapshot polling while disconnected (B13); events never mutate server state |
-| Typed event payloads, not free-form strings | Verified — per-event Pydantic models in `app/schemas/realtime.py`; mirrored TS types in `src/ws/client.ts` |
+| p1×3, p2×2, p3×5 → play order p1,p2,p3 / p1,p2,p3 / p1,p3 / p3 / p3 | Verified — `test_round_robin_order_and_auto_advance` (P1,P2,P3 → P1,P2 after round-1 exhaustion) plus the live smoke |
+| A participant's 2nd song is invisible until every participant's 1st song is done | Verified — `test_second_song_goes_to_a_future_round` (position null, not in snapshot) |
+| Stable round order; late joiners appended to the current round | Verified — `test_stable_order_repeats_across_rounds`, `test_late_joiner_appends_to_current_round` |
+| Participants whose songs run out drop out automatically | Verified — round-2 snapshot omits participants with no round-2 song |
+| Per-participant cap (5) enforced with a clear message | Verified — `test_submit_song_cap_conflicts` (409 "at most 5") + `test_submit_after_cancel_frees_a_song_cap_slot` |
+| No `ROUND_COMPLETE`; rounds advance automatically, no enrollment | Verified — `ROUND_COMPLETE` removed from `SessionStatus` + transitions; `test_new_submission_after_full_exhaustion_starts_next_round` |
+| Positions within the current round; future-round songs have no position | Verified — `test_my_entries_lists_current_and_upcoming_songs` (position null for upcoming) |
 
 Additional verification:
 
-- Backend suite: **175 passed** (163 prior + 12 new `tests/test_realtime.py`),
-  `pyright` = 0 errors.
+- Backend suite: **184 passed** (175 prior + 9 new queue/round tests), `pyright`
+  0 errors.
 - Frontend: `npm run typecheck`, `npm run lint`, `npm run build` all pass.
-- Live smoke (`websockets` client against the running server): participant and
-  host streams connect with valid tokens; `ParticipantJoined`/`SessionUpdated`
-  events delivered; tokenless, cross-session, and non-owner connections rejected
-  (HTTP 403 on the upgrade / close 1008 in-process).
-- No schema change, no new dependency (TestClient WS uses the already-present
-  `websockets` via uvicorn[standard]).
+- Live smoke against real PostgreSQL + real YouTube metadata: Alice song1 → pos 1,
+  Alice song2 → pos null, Bob song1 → pos 2; snapshot round 1 = [Alice, Bob];
+  my-songs = [(A, 1), (B, null)]; after the host removes the round-1 entries the
+  snapshot auto-advances to round 2 = [Alice(B)].
+- No schema migration: entries were already round-scoped; the change is pure
+  service/query logic (D43). The `Round` table gains lazily-created later rounds.
 
-## Files changed (M10)
+## Files changed (M10.1)
 
 ```text
-backend/app/schemas/realtime.py        (new — typed event models + RealtimeEvent union)
-backend/app/realtime/__init__.py       (new — realtime delivery package)
-backend/app/realtime/hub.py            (new — in-process RealtimeHub, decision D42)
-backend/app/api/routes/realtime.py     (new — WS endpoint + host/participant binding)
-backend/app/main.py                    (include the realtime router)
-backend/app/services/queue.py          (cancel/remove now return the entry for publishing)
-backend/app/api/routes/entries.py      (_build_snapshot shared by REST+realtime; publish
-                                        QueueUpdated on submit/cancel/remove/edit)
-backend/app/api/routes/join.py         (publish ParticipantJoined on register)
-backend/app/api/routes/sessions.py     (publish SessionUpdated on start/end)
-backend/tests/test_realtime.py         (new — 12 tests: auth/binding + event fan-out)
-frontend/src/ws/client.ts              (new — typed realtime client + event parsing)
-frontend/src/ws/useRealtime.ts         (new — subscribe/reconnect hook)
-frontend/src/features/queue/QueueScreen.tsx        (realtime + fallback polling)
-frontend/src/features/host/HostDashboardScreen.tsx (realtime + fallback polling)
-frontend/vite.config.ts                (proxy websocket: ws: true)
-docs/PROJECT_BRAIN.md                  (M10 milestone, decisions, limitations, structure)
-docs/ARCHITECTURE.md                   (backend layout + realtime section + milestone list)
-docs/DECISIONS.md                      (D42 realtime decision; open question resolved)
-docs/API_CONTRACT.md                   (§8 Realtime marked implemented with payloads)
-docs/RUNBOOK.md                        (M10 verification section)
+backend/app/core/config.py                    (+ KARAOKE_QUEUE_MAX_SONGS_PER_PARTICIPANT, default 5, D45)
+backend/.env.example                          (+ the new setting)
+backend/app/domain/session.py                 (ROUND_COMPLETE removed; CREATED->ACTIVE<->PAUSED->ENDED)
+backend/app/services/queue.py                 (round-robin engine: SongLimitError, round assignment,
+                                               derived active round, stable ordering, participant
+                                               entries, get_current_round_number)
+backend/app/schemas/queue.py                  (QueueSnapshotResponse + round_number)
+backend/app/api/routes/entries.py             (submit cap -> 409; _build_snapshot + round_number;
+                                               new GET /entries/mine "my songs" endpoint)
+backend/app/domain/queue_entry.py             (non_terminal docstring -> per-participant cap)
+backend/tests/test_queue.py                   (cap tests, round assignment/stable order/auto-advance/
+                                               late joiner/round_number/my-songs tests)
+backend/tests/test_sessions.py                (ROUND_COMPLETE assertions removed)
+frontend/src/api/types.ts                     (QueueSnapshot.round_number; ROUND_COMPLETE dropped)
+frontend/src/api/entries.ts                   (+ fetchMyEntries)
+frontend/src/lib/session.ts                   (statusLabel: ROUND_COMPLETE dropped)
+frontend/src/App.css                          (.badge-round replaces .badge-round_complete)
+frontend/src/features/queue/QueueScreen.tsx   (round badge, "Your songs" section with cancel,
+                                               one-entry-per-participant queue)
+frontend/src/features/host/HostDashboardScreen.tsx (round indicator in the queue heading)
+docs/PROJECT_BRAIN.md, docs/ARCHITECTURE.md, docs/DECISIONS.md, docs/DEV_BRAIN.md,
+docs/PRODUCT_SPEC.md, docs/DOMAIN_MODEL.md, docs/API_CONTRACT.md, docs/RUNBOOK.md, plan.md
 ```
 
-## Implementation notes (M10)
+## Implementation notes (M10.1)
 
-- **One socket, two audiences:** both the participant queue screen and the host
-  dashboard subscribe to the same per-session channel. The bearer token is
-  passed as a `token` query parameter (the browser WebSocket API cannot set
-  headers) and must belong to the session — a participant token must be bound
-  to it, a host token must own it (decision D42, no existence leak per D29).
-- **Delivery only (D5):** `QueueUpdated` carries the full authoritative
-  `QueueSnapshotResponse`, so every subscriber renders exactly the state the
-  REST snapshot returns. The hub is in-process and per-worker (D9 — no Redis);
-  a shared hub becomes necessary only if the backend ever runs >1 worker.
-- **Only real producers emit:** M10 emits `QueueUpdated` (submit/cancel/remove/
-  edit), `ParticipantJoined` (join), and `SessionUpdated` (start/end). The other
-  events in API_CONTRACT §8 (`SingerStarted`, `RoundCompleted`, `SessionPaused`,
-  …) are not emitted until their milestones create the code paths (M11/M13/
-  M14/M16) — no dead event plumbing.
-- **Frontend:** `src/ws/useRealtime.ts` auto-reconnects with a 3 s delay; while
-  disconnected both screens poll the authoritative snapshot every 5 s (B13).
-  `QueueUpdated` replaces the snapshot state directly; `SessionUpdated` syncs the
-  status badge / ended banner without a refetch.
-- **No scope creep:** no new dependencies (reused the existing `websockets`
-  transitively available via uvicorn[standard] for TestClient), no schema
-  change, no Redis.
+- **Round assignment (B19/D43):** a new song goes to the current round (the
+  lowest-numbered round with a non-terminal entry) when the participant has no
+  non-terminal entry there; otherwise to one round above their highest. When the
+  queue is fully exhausted, a fresh submission starts the next numbered round —
+  except on a brand-new session, where the first songs belong to round 1 (this
+  was a bug caught by the tests: the first submission went to round 2).
+- **Derived active round:** never stored (D8-style). `_active_round` is a single
+  JOIN query; `get_active_entries` orders the current round by each participant's
+  earliest submission time (`MIN(created_at)` via an aggregated subquery join),
+  then `created_at`/`id`.
+- **Cap:** `KARAOKE_QUEUE_MAX_SONGS_PER_PARTICIPANT` (default 5) counts the
+  participant's non-terminal entries across all rounds. `ActiveEntryLimitError`
+  was renamed `SongLimitError` (the "active entries in this round" limit no
+  longer exists).
+- **No `RoundStarted` event:** round advances are visible through
+  `round_number` in the `QueueUpdated` snapshot (the mutation that empties a
+  round already broadcasts it).
+- **Frontend:** the participant queue screen shows a `Round N` badge and a
+  "Your songs" section (current-round entry with its position + upcoming songs,
+  each cancellable — cancel already worked for any own WAITING entry). The host
+  dashboard queue heading shows the active round.
+- **No scope creep:** no new dependencies, no schema migration, no enrollment
+  prompt, no `RoundStarted` event.
 
-## Tests added (M10)
+## Tests added (M10.1)
 
-- `tests/test_realtime.py` (12 tests): token required; unknown token rejected;
-  participant from another session rejected; unknown session rejected; host who
-  does not own the session rejected; `QueueUpdated` on submit / cancel / host
-  remove / host edit; `ParticipantJoined` on register; `SessionUpdated` on
-  start / end.
+- `test_queue.py` (9 new/rewritten): song cap (409 at 6th), cancel frees a cap
+  slot, second song → future round (position null, invisible in snapshot),
+  round-robin order + auto-advance via host removals, stable order repeats
+  across rounds, late joiner appended, empty-queue round_number default,
+  fresh-cycle round after full exhaustion, and the participant "my songs"
+  endpoint (auth, cross-session 404, current+upcoming listing).
+- `test_sessions.py`: `ROUND_COMPLETE` transition assertions removed.
 
 ## Current blockers
 
@@ -120,7 +126,8 @@ docs/RUNBOOK.md                        (M10 verification section)
 
 **M11 — Playback state machine** (backend): formalize the playback states
 (IDLE → PREPARING → COUNTDOWN → PLAYING → COOLDOWN → …) so the backend can
-determine exactly which singer/song is active (plan.md §M11). Then the host
-dashboard's skip/finish/pause/resume actions (currently disabled, D40) and the
-corresponding `SingerStarted`/`SingerFinished`/`SingerSkipped` realtime events
-become implementable.
+determine exactly which singer/song is active — the first non-terminal entry of
+the current round (M10.1). Round boundaries are just another transition. Then
+the host dashboard's skip/finish/pause/resume actions (currently disabled, D40)
+and the `SingerStarted`/`SingerFinished`/`SingerSkipped` realtime events become
+implementable.

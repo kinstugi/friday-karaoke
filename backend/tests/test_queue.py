@@ -1,7 +1,8 @@
-"""Tests for the queue engine (M7).
+"""Tests for the queue engine (M7) and the round-robin ordering (M10.1).
 
-Covers submission (active-entry limit B15, duplicate notice B16, deterministic
-ordering E19), the public snapshot with computed positions (D8), participant
+Covers submission (per-participant song cap B15/D45, duplicate notice B16,
+round assignment B19/D43), the public snapshot of the current round with
+computed positions (D8/D43), stable ordering + auto-advance, participant
 cancellation (B3), host removal and URL editing (B4/E7), and persistence.
 The YouTube fetch is mocked; parsing is covered in test_youtube.py.
 """
@@ -194,7 +195,7 @@ def test_submit_unavailable_video_is_not_found(
     assert "couldn't load" in response.json()["detail"]
 
 
-def test_submit_active_entry_limit_conflicts(
+def test_submit_song_cap_conflicts(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _patch_youtube(
@@ -202,15 +203,18 @@ def test_submit_active_entry_limit_conflicts(
         {VIDEO_A_ID: _video_a(), VIDEO_B_ID: _video_b()},
     )
     _, session_body, token = _setup(client)
-    first = _submit(client, session_body["id"], token, f"https://youtu.be/{VIDEO_A_ID}")
-    assert first.status_code == 201
-    second = _submit(client, session_body["id"], token, f"https://youtu.be/{VIDEO_B_ID}")
-    assert second.status_code == 201
-    assert second.json()["entry"]["position"] == 2
+    # 5 songs are allowed (default cap, D45); the 6th is rejected.
+    for _ in range(5):
+        submitted = _submit(
+            client, session_body["id"], token, f"https://youtu.be/{VIDEO_A_ID}"
+        )
+        assert submitted.status_code == 201, submitted.text
 
-    third = _submit(client, session_body["id"], token, f"https://youtu.be/{VIDEO_A_ID}")
-    assert third.status_code == 409
-    assert "active songs" in third.json()["detail"]
+    sixth = _submit(
+        client, session_body["id"], token, f"https://youtu.be/{VIDEO_B_ID}"
+    )
+    assert sixth.status_code == 409
+    assert "at most 5" in sixth.json()["detail"]
 
 
 def test_submit_duplicate_song_notice_not_a_block(
@@ -232,7 +236,7 @@ def test_submit_duplicate_song_notice_not_a_block(
     assert "already in the queue" in body["notice"]
 
 
-def test_submit_after_cancel_frees_a_limit_slot(
+def test_submit_after_cancel_frees_a_song_cap_slot(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _patch_youtube(
@@ -241,17 +245,25 @@ def test_submit_after_cancel_frees_a_limit_slot(
     )
     _, session_body, token = _setup(client)
     first = _submit(client, session_body["id"], token, f"https://youtu.be/{VIDEO_A_ID}")
-    second = _submit(client, session_body["id"], token, f"https://youtu.be/{VIDEO_B_ID}")
-    first_entry_id = first.json()["entry"]["id"]
+    assert first.status_code == 201
+    for _ in range(4):
+        submitted = _submit(
+            client, session_body["id"], token, f"https://youtu.be/{VIDEO_A_ID}"
+        )
+        assert submitted.status_code == 201, submitted.text
 
+    # The 6th song is blocked by the cap.
+    sixth = _submit(client, session_body["id"], token, f"https://youtu.be/{VIDEO_B_ID}")
+    assert sixth.status_code == 409
+
+    # Cancelling one frees a slot (cancelled entries do not count, B15).
     cancel = client.delete(
-        f"{ENTRIES_URL}/{first_entry_id}",
+        f"{ENTRIES_URL}/{first.json()['entry']['id']}",
         headers={"Authorization": f"Bearer {token}"},
     )
     assert cancel.status_code == 204
-
-    third = _submit(client, session_body["id"], token, f"https://youtu.be/{VIDEO_A_ID}")
-    assert third.status_code == 201  # cancelled entries do not count (B15)
+    retry = _submit(client, session_body["id"], token, f"https://youtu.be/{VIDEO_B_ID}")
+    assert retry.status_code == 201
 
 
 # --- Snapshot -------------------------------------------------------------------
@@ -280,6 +292,7 @@ def test_snapshot_returns_deterministic_order_and_positions(
     body = response.json()
     assert body["session_id"] == session_body["id"]
     assert body["status"] == "CREATED"
+    assert body["round_number"] == 1
     queue = body["queue"]
     assert [e["participant_name"] for e in queue] == ["Alice", "Bob"]
     assert [e["position"] for e in queue] == [1, 2]
@@ -304,6 +317,202 @@ def test_snapshot_excludes_processed_entries(
 def test_snapshot_unknown_session_is_not_found(client: TestClient) -> None:
     response = _snapshot(client, str(uuid.uuid4()))
     assert response.status_code == 404
+
+
+# --- Rounds (M10.1) --------------------------------------------------------------
+
+
+def test_second_song_goes_to_a_future_round(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_youtube(
+        monkeypatch,
+        {VIDEO_A_ID: _video_a(), VIDEO_B_ID: _video_b()},
+    )
+    _, session_body, alice = _setup(client, nickname="Alice")
+    bob = _join_participant(client, session_body, nickname="Bob")
+
+    # Alice queues two songs; only the first is in the active (round 1) queue.
+    first = _submit(client, session_body["id"], alice, f"https://youtu.be/{VIDEO_A_ID}")
+    second = _submit(client, session_body["id"], alice, f"https://youtu.be/{VIDEO_B_ID}")
+    assert first.status_code == 201, first.text
+    assert second.status_code == 201, second.text
+    assert first.json()["entry"]["position"] == 1
+    assert second.json()["entry"]["position"] is None  # future round, not active
+
+    # Bob's first song joins round 1 behind Alice (stable order).
+    bob_first = _submit(client, session_body["id"], bob, f"https://youtu.be/{VIDEO_A_ID}")
+    assert bob_first.status_code == 201, bob_first.text
+    assert bob_first.json()["entry"]["position"] == 2
+
+    body = _snapshot(client, session_body["id"]).json()
+    assert body["round_number"] == 1
+    assert [e["participant_name"] for e in body["queue"]] == ["Alice", "Bob"]
+    assert [e["video_id"] for e in body["queue"]] == [VIDEO_A_ID, VIDEO_A_ID]
+
+
+def test_round_robin_order_and_auto_advance(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_youtube(
+        monkeypatch,
+        {VIDEO_A_ID: _video_a(), VIDEO_B_ID: _video_b()},
+    )
+    headers, session_body, p1 = _setup(client, nickname="P1")
+    p2 = _join_participant(client, session_body, nickname="P2")
+    p3 = _join_participant(client, session_body, nickname="P3")
+
+    # Round 1: everyone's first song (P1, P2, P3 in engagement order).
+    for token in (p1, p2, p3):
+        submitted = _submit(
+            client, session_body["id"], token, f"https://youtu.be/{VIDEO_A_ID}"
+        )
+        assert submitted.status_code == 201, submitted.text
+
+    # Round 2: P1 and P2 queue their second songs (P3 has only one).
+    for token in (p1, p2):
+        submitted = _submit(
+            client, session_body["id"], token, f"https://youtu.be/{VIDEO_B_ID}"
+        )
+        assert submitted.status_code == 201, submitted.text
+
+    body = _snapshot(client, session_body["id"]).json()
+    assert body["round_number"] == 1
+    assert [e["participant_name"] for e in body["queue"]] == ["P1", "P2", "P3"]
+
+    # Auto-advance: host removes every round-1 entry -> round 2 becomes active.
+    for entry in body["queue"]:
+        removed = client.delete(
+            f"{ENTRIES_URL}/{entry['id']}", headers=headers
+        )
+        assert removed.status_code == 204, removed.text
+
+    body = _snapshot(client, session_body["id"]).json()
+    assert body["round_number"] == 2
+    # Stable participant order repeats: P1 before P2 (P3 has no round-2 song).
+    assert [e["participant_name"] for e in body["queue"]] == ["P1", "P2"]
+    assert [e["video_id"] for e in body["queue"]] == [VIDEO_B_ID, VIDEO_B_ID]
+
+
+def test_stable_order_repeats_across_rounds(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_youtube(
+        monkeypatch,
+        {VIDEO_A_ID: _video_a(), VIDEO_B_ID: _video_b()},
+    )
+    headers, session_body, p1 = _setup(client, nickname="P1")
+    p2 = _join_participant(client, session_body, nickname="P2")
+
+    # P1 engages first, then P2.
+    _submit(client, session_body["id"], p1, f"https://youtu.be/{VIDEO_A_ID}")
+    _submit(client, session_body["id"], p2, f"https://youtu.be/{VIDEO_A_ID}")
+    # Round 2: P2 submits first this time, then P1.
+    _submit(client, session_body["id"], p2, f"https://youtu.be/{VIDEO_B_ID}")
+    _submit(client, session_body["id"], p1, f"https://youtu.be/{VIDEO_B_ID}")
+
+    round_one = _snapshot(client, session_body["id"]).json()
+    assert [e["participant_name"] for e in round_one["queue"]] == ["P1", "P2"]
+
+    # Exhaust round 1 -> round 2 must still be P1 then P2 (stable order).
+    for entry in round_one["queue"]:
+        client.delete(f"{ENTRIES_URL}/{entry['id']}", headers=headers)
+    round_two = _snapshot(client, session_body["id"]).json()
+    assert round_two["round_number"] == 2
+    assert [e["participant_name"] for e in round_two["queue"]] == ["P1", "P2"]
+
+
+def test_late_joiner_appends_to_current_round(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_youtube(monkeypatch, {VIDEO_A_ID: _video_a()})
+    _, session_body, p1 = _setup(client, nickname="P1")
+    p2 = _join_participant(client, session_body, nickname="P2")
+    _submit(client, session_body["id"], p1, f"https://youtu.be/{VIDEO_A_ID}")
+    _submit(client, session_body["id"], p2, f"https://youtu.be/{VIDEO_A_ID}")
+
+    # P3 joins mid-round: their first song is appended to the current round.
+    p3 = _join_participant(client, session_body, nickname="P3")
+    submitted = _submit(client, session_body["id"], p3, f"https://youtu.be/{VIDEO_A_ID}")
+    assert submitted.status_code == 201, submitted.text
+    assert submitted.json()["entry"]["position"] == 3
+
+    body = _snapshot(client, session_body["id"]).json()
+    assert [e["participant_name"] for e in body["queue"]] == ["P1", "P2", "P3"]
+
+
+def test_round_number_defaults_when_queue_empty(client: TestClient) -> None:
+    _, session_body, _ = _setup(client)
+    body = _snapshot(client, session_body["id"]).json()
+    assert body["queue"] == []
+    assert body["round_number"] == 1
+
+
+def test_new_submission_after_full_exhaustion_starts_next_round(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_youtube(monkeypatch, {VIDEO_A_ID: _video_a()})
+    headers, session_body, p1 = _setup(client, nickname="P1")
+    submitted = _submit(client, session_body["id"], p1, f"https://youtu.be/{VIDEO_A_ID}")
+    assert submitted.status_code == 201, submitted.text
+    # Host removes the only entry -> the queue is fully exhausted.
+    removed = client.delete(
+        f"{ENTRIES_URL}/{submitted.json()['entry']['id']}", headers=headers
+    )
+    assert removed.status_code == 204
+    assert _snapshot(client, session_body["id"]).json()["queue"] == []
+
+    # A brand-new participant's first song starts a fresh cycle (round 2).
+    p2 = _join_participant(client, session_body, nickname="P2")
+    resp = _submit(client, session_body["id"], p2, f"https://youtu.be/{VIDEO_A_ID}")
+    assert resp.status_code == 201, resp.text
+    body = _snapshot(client, session_body["id"]).json()
+    assert body["round_number"] == 2
+    assert [e["participant_name"] for e in body["queue"]] == ["P2"]
+
+
+# --- My songs (participant, M10.1) ------------------------------------------------
+
+
+def test_my_entries_requires_participant_authentication(client: TestClient) -> None:
+    response = client.get(f"{SESSIONS_URL}/{uuid.uuid4()}/entries/mine")
+    assert response.status_code == 401
+
+
+def test_my_entries_from_another_session_is_not_found(client: TestClient) -> None:
+    _, session_a, token_a = _setup(client, email=EMAIL)
+    _, session_b, _ = _setup(client, email=OTHER_EMAIL)
+    response = client.get(
+        f"{SESSIONS_URL}/{session_b['id']}/entries/mine",
+        headers={"Authorization": f"Bearer {token_a}"},
+    )
+    assert response.status_code == 404
+
+
+def test_my_entries_lists_current_and_upcoming_songs(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_youtube(
+        monkeypatch,
+        {VIDEO_A_ID: _video_a(), VIDEO_B_ID: _video_b()},
+    )
+    _, session_body, alice = _setup(client, nickname="Alice")
+    bob = _join_participant(client, session_body, nickname="Bob")
+    _submit(client, session_body["id"], alice, f"https://youtu.be/{VIDEO_A_ID}")
+    _submit(client, session_body["id"], alice, f"https://youtu.be/{VIDEO_B_ID}")
+    _submit(client, session_body["id"], bob, f"https://youtu.be/{VIDEO_A_ID}")
+
+    response = client.get(
+        f"{SESSIONS_URL}/{session_body['id']}/entries/mine",
+        headers={"Authorization": f"Bearer {alice}"},
+    )
+    assert response.status_code == 200, response.text
+    mine = response.json()
+    # Current-round entry first (with position), upcoming song second (no position).
+    assert [e["video_id"] for e in mine] == [VIDEO_A_ID, VIDEO_B_ID]
+    assert mine[0]["position"] == 1
+    assert mine[1]["position"] is None
+    assert all(e["participant_name"] == "Alice" for e in mine)
 
 
 # --- Cancel (participant) --------------------------------------------------------

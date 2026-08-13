@@ -46,10 +46,10 @@ from app.schemas.youtube import (
     YouTubeVideoData,
 )
 from app.services.queue import (
-    ActiveEntryLimitError,
     DUPLICATE_NOTICE,
     EntryNotCancellableError,
     EntryNotFoundError,
+    SongLimitError,
     queue_service,
 )
 from app.services.session import SessionNotFoundError, session_service
@@ -157,6 +157,7 @@ async def _build_snapshot(
     return QueueSnapshotResponse(
         session_id=karaoke.id,
         status=karaoke.status,
+        round_number=await queue_service.get_current_round_number(session, session_id),
         queue=[
             _entry_to_response(entry, index)
             for index, entry in enumerate(active, start=1)
@@ -204,7 +205,7 @@ async def submit_song(
 
     try:
         entry, duplicate = await queue_service.submit(session, participant, data)
-    except ActiveEntryLimitError as exc:
+    except SongLimitError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail=str(exc)
         ) from exc
@@ -233,6 +234,27 @@ async def queue_snapshot(
         return await _build_snapshot(session, session_id)
     except SessionNotFoundError as exc:
         raise _not_found() from exc
+
+
+@router.get("/mine", response_model=list[QueueEntryResponse])
+async def my_entries(
+    session_id: uuid.UUID,
+    participant: Annotated[Participant, Depends(get_current_participant)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> list[QueueEntryResponse]:
+    """Return the participant's own queued songs (current + upcoming rounds).
+
+    Order is by round number then submission order. The current-round entry (if
+    any) carries its position in the active queue; upcoming songs have
+    ``position: null`` (they are not in the active queue until their round,
+    M10.1).
+    """
+    await _session_for_participant(session, session_id, participant)
+    entries = await queue_service.get_participant_entries(session, participant)
+    return [
+        _entry_to_response(entry, await _position_of(session, session_id, entry.id))
+        for entry in entries
+    ]
 
 
 # --- Entry-scoped: cancel/remove and host edit --------------------------------

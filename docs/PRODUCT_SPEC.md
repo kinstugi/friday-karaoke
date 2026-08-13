@@ -26,15 +26,16 @@ night:
   phones never play audio.
 - Song flow is **automated** (cooldown → countdown → song), with the host able to
   override anything at any time.
-- A session supports **multiple rounds**; after each round, participants are asked
-  whether they want to join the next one (default: YES).
+- A session supports **multiple rounds**; each round is one pass through the
+  participants' current songs (round N = everyone's N-th song), and rounds
+  advance **automatically** to everyone's next song (no enrollment).
 
 ## 2. Roles and authority matrix
 
 | Role | Identity | Can do |
 | ---- | -------- | ------ |
-| Host | Account (email/password, M3). One host owns a session. | Create/start/pause/resume/end session; display QR; monitor queue; remove any entry; edit any song URL; skip; manually advance; start next round |
-| Participant | Session-scoped identity: nickname + opaque token (M5). No account. | Join; submit songs; review metadata; cancel own WAITING entries; view queue and position; answer next-round prompt |
+| Host | Account (email/password, M3). One host owns a session. | Create/start/pause/resume/end session; display QR; monitor queue; remove any entry; edit any song URL; skip; manually advance |
+| Participant | Session-scoped identity: nickname + opaque token (M5). No account. | Join; submit songs; review metadata; cancel own WAITING entries (current or upcoming rounds); view queue and position |
 
 | Action | Host | Participant |
 | ------ | :--: | :---------: |
@@ -43,12 +44,11 @@ night:
 | Join session | — | ✅ |
 | Submit song (queue entry) | ❌ | ✅ |
 | Review song metadata before submitting | — | ✅ |
-| Cancel own WAITING entry | ❌ (but can remove any) | ✅ |
+| Cancel own WAITING entry (any round) | ❌ (but can remove any) | ✅ |
 | Remove any queue entry | ✅ | ❌ |
 | Edit a song URL (re-fetch metadata) | ✅ | ❌ |
 | Skip current singer / manually advance | ✅ | ❌ |
-| Answer next-round prompt | — | ✅ (default YES) |
-| Start next round | ✅ | ❌ |
+| Cancel upcoming (future-round) songs | ❌ (but can remove any) | ✅ |
 
 Rule: **Host actions are authorized server-side** against the owning host account.
 **Participant actions are authorized server-side** against the participant token.
@@ -58,7 +58,7 @@ Rule: **Host actions are authorized server-side** against the owning host accoun
 States (`SessionStatus` in `docs/DOMAIN_MODEL.md`):
 
 ```text
-CREATED -> ACTIVE <-> PAUSED -> ROUND_COMPLETE -> ENDED
+CREATED -> ACTIVE <-> PAUSED -> ENDED
 ```
 
 The diagram shows the **normal path**. `ENDED` is reachable from any state
@@ -70,7 +70,6 @@ shows the typical progression.
 | `CREATED` | Session created; QR/join code shown immediately | ✅ (early birds may join and queue) | ❌ (no automation until start) |
 | `ACTIVE` | Host started; automation runs | ✅ | ✅ |
 | `PAUSED` | Host paused automatic progression | ✅ | ❌ automation (manual host actions still work) |
-| `ROUND_COMPLETE` | Current round's queue exhausted; enrollment prompt active | ✅ | ❌ (new round required) |
 | `ENDED` | Session closed for good | ❌ (QR/link returns "session ended") | ❌ |
 
 Rules:
@@ -80,55 +79,50 @@ Rules:
 - Only the owning host can change session state. Every state change is a server-side
   transition; the frontend merely renders it.
 - `ENDED` is terminal. A new night requires a new session.
+- There is no `ROUND_COMPLETE` state (removed at M10.1): rounds advance
+  automatically while the session is `ACTIVE`, so the host never has to "start
+  the next round".
 
 ## 4. Round lifecycle
 
-A session contains one or more rounds. Rounds are numbered 1, 2, 3, ….
+A session contains one or more rounds. Rounds are numbered 1, 2, 3, … and advance
+**automatically** (M10.1): round N holds one song from each participant who has a
+song for that round (their N-th song), and when the round's queue is exhausted the
+session moves to round N+1 — the participants' next songs — with no prompt and no
+host action.
 
 ```text
-Host starts round N
-  -> participants submit entries (queue forms by submission order)
+Round N active
+  -> participants submit entries (one per participant per round)
   -> automation advances the queue (cooldown/countdown/song)
   -> queue becomes empty
-  -> Round N complete -> enrollment prompt for Round N+1
-  -> Host starts Round N+1 (YES participants form the new queue)
+  -> Round N completes -> Round N+1 begins automatically
 ```
 
 ### Queue ordering
 
-- **Within a round**: queue order is the order in which entries were submitted
-  (creation order). The backend derives positions from this; there is no mutable
-  position field.
-- **Between rounds**: the Round N+1 queue is the list of participants who are
-  enrolled (answered YES) for Round N+1, ordered deterministically:
+- **Within a round**: queue order is the **stable participant order** — the order
+  in which participants first engaged (their earliest submission), fixed once and
+  repeated in every round. A participant who joins mid-round is appended to the
+  current round and keeps that (later) position in future rounds. The backend
+  derives positions from this order; there is no mutable position field.
+- **Between rounds**: round N+1 is simply each participant's next song. There is
+  **no enrollment** and no "join the next round" step; a participant whose songs
+  run out simply does not appear in later rounds.
 
-  1. Explicit YES answers first, in the order the answers were received.
-  2. Default-YES participants (no answer) appended in participant-creation order,
-     resolved when the host starts the round.
+### Song submission and round assignment
 
-  This order is fixed by the backend at round start; participants see their new
-  position immediately.
-
-  **Interleaving with submissions during round N+1:** the enrollment order fixes the
-  relative order of enrolled participants. When an enrolled participant submits a
-  song for round N+1 (at any time during the round), their entry is placed ahead of
-  every entry from non-enrolled participants, at the position determined by the
-  enrollment order. Entries from participants who are **not** enrolled (e.g.,
-  students who join mid-round) append in submission order after all enrolled
-  entries. A participant who answered **NO** for round N+1 is excluded from that
-  round and cannot submit entries into it; they rejoin at the next enrollment.
-
-### Next-round enrollment
-
-- At round completion, the session enters `ROUND_COMPLETE` and every participant
-  in the session (who joined before round start) receives the prompt
-  "Join the next round?" with **YES** / **NO**.
-- **Default: YES.** Not answering counts as YES.
-- Explicit **NO** excludes the participant from the next round (they can still
-  rejoin by answering YES for the round after that).
-- Participants who join *after* round N started are not asked about round N+1
-  enrollment retroactively; they join round N+1 normally (their entries land in
-  whichever round is active when they submit).
+- A participant may queue up to **5 songs total** (configurable via
+  `KARAOKE_QUEUE_MAX_SONGS_PER_PARTICIPANT`, rule B15).
+- A participant's new song goes to the **current round** when they have no
+  non-terminal entry there (their first song, or rejoining the round after a
+  skip/cancel). A participant who already has a non-terminal song in the current
+  round places their new song in the next round above their highest round.
+  At most **one non-terminal entry per participant per round**.
+- A participant who joins mid-round has their first song appended to the current
+  round; subsequent songs go to later rounds.
+- Cancelling a WAITING entry works for any of the participant's own songs, in the
+  current round or a future round (B3).
 
 ## 5. Host flow (detailed)
 
@@ -165,11 +159,12 @@ Host starts round N
   resume restarts automation.
 - **End session**: closes the session for good (`ENDED`).
 
-### 5.6 Finish round / start next round
-1. When the queue empties, the round completes automatically → `ROUND_COMPLETE`.
-2. Host sees enrollment status (who said YES/NO; pending counts as YES).
-3. Host taps **Start Next Round** → new round begins with enrolled participants.
-4. Host may instead tap **End Session**.
+### 5.6 Round boundaries (automatic)
+1. When the queue empties, the round completes and the **next round begins
+   automatically** (participants' next songs appear in the queue; the round
+   number increments). No enrollment and no host action required.
+2. The dashboard shows the active round number. The host may end the session at
+   any time (§5.7); a participant who wants out cancels their remaining songs.
 
 ### 5.7 End session
 1. Host ends the session → `ENDED`. QR/link no longer accepts joins.
@@ -201,9 +196,11 @@ Host starts round N
 2. Participant confirms **Add to Queue** (or **Try Another URL**).
 
 ### 6.5 Join the queue
-1. On confirm, the backend creates the queue entry (`WAITING`) in the active round.
-2. If the participant has reached the **active-entry limit** (see §8, rule E2), the
-   submission is rejected with a clear message.
+1. On confirm, the backend assigns the entry to a round (rule B19): the current
+   round if the participant has no non-terminal entry there, otherwise the next
+   round above their highest round.
+2. If the participant has reached the **per-participant song cap** (default 5,
+   see §9, B15), the submission is rejected with a clear message.
 3. The participant lands on the **queue screen**.
 
 ### 6.6 Monitor position
@@ -221,11 +218,15 @@ Host starts round N
 1. When their song starts, the participant sings along (audio plays on the host
    device; the participant's phone shows their song/position only).
 
-### 6.9 Answer the next-round prompt
-1. After the round ends, the participant's queue screen shows "Join the next round?"
-   with YES / NO buttons.
-2. Default if they do nothing: YES.
-3. NO removes them from the next round's queue (their entries do not carry over).
+### 6.9 Manage your songs
+1. The participant's queue screen shows all their queued songs: the one in the
+   current round (with its position) plus their upcoming songs for later rounds.
+2. Any own WAITING song — current round or upcoming — can be cancelled (B3).
+   Cancelling a current-round song removes it from the round; cancelling an
+   upcoming song takes it out of a later round.
+3. A participant who cancels their remaining songs is out for the rest of the
+   night (no enrollment to rejoin; they could re-join via a new nickname if the
+   host permits, but the session itself does not re-ask).
 
 ## 7. Screen inventory (UX requirements)
 
@@ -238,15 +239,18 @@ Host starts round N
   (thumbnail/title/channel/duration + warnings), confirm/cancel buttons.
 
 ### 7.3 Participant: queue screen
-- Session status banner; "Now singing" card; "Up next" card; queue list with each
-  entry's song title and participant name; the participant's own entries highlighted
-  with their position; the next-round prompt when the round completes.
+- Session status banner; "Now singing" card; "Up next" card; the active round's
+  queue list (one song per participant, with each entry's song title and
+  participant name); the participant's own songs highlighted — the current-round
+  song with its position plus an "Your songs" section for upcoming rounds, each
+  cancellable.
 - Reconnect/loading/error states (see §8, P-edge cases).
 
 ### 7.4 Host: dashboard
-- Current singer + song + playback status; queue list (names, titles, durations);
-  per-entry actions (remove, edit); global actions (start, pause/resume, skip,
-  advance, start next round, end session); QR + join code display (post-creation).
+- Current singer + song + playback status; the active round number; queue list
+  (one song per participant — names, titles, durations); per-entry actions
+  (remove, edit); global actions (start, pause/resume, skip, advance, end
+  session); QR + join code display (post-creation).
 - Must be usable on a projector/TV (large text, high contrast, minimal scrolling
   for current/next).
 - Must handle browser-autoplay restrictions: playback begins only after host
@@ -286,7 +290,7 @@ Every edge case lists the **behavior** an implementer must produce.
 ### E6. Host removes a participant (or their entry)
 - Behavior: host removes the entry (status `REMOVED`). Removing the current entry
   advances playback to the next. The participant remains connected and can submit
-  again (if below the active-entry limit).
+  again (if below the per-participant song cap, B15).
 
 ### E7. Host edits a song
 - Behavior: host replaces the URL; backend re-validates + re-fetches metadata.
@@ -326,17 +330,21 @@ Every edge case lists the **behavior** an implementer must produce.
   Used when the singer finished early.
 
 ### E15. Queue becomes empty (round ends)
-- Behavior: round completes automatically → `ROUND_COMPLETE`; the enrollment prompt
-  opens (see §4). Automation stops; nothing auto-advances until the host starts the
-  next round.
+- Behavior: the round completes automatically and the **next round begins
+  immediately** (participants' next songs are added to the queue, M10.1). If no
+  participant has a next song, the queue simply stays empty and the session
+  remains `ACTIVE` waiting for new submissions (see E23) — nothing deadlocks and
+  there is no enrollment prompt.
 
 ### E16. Round ends
-- Behavior: as E15 plus: participants are asked to enroll for the next round; the
-  host sees enrollment status and decides: start next round or end session.
+- Behavior: as E15 plus: there is no "join the next round" prompt. The host sees
+  the new round number; participants whose songs run out are no longer in the
+  queue; the host may moderate or end the session at any time.
 
-### E17. Participant does not answer the next-round prompt
-- Behavior: default **YES**. The participant is enrolled when the host starts the
-  next round (see §4 ordering).
+### E17. Participant wants to stop after their current song
+- Behavior: the participant cancels their remaining (upcoming) songs, or simply
+  lets their list run out — either way they do not appear in later rounds. No
+  prompt is involved.
 
 ### E18. Session ends while participants are connected
 - Behavior: their queue screens show "This karaoke night has ended." Entries are
@@ -369,6 +377,13 @@ Every edge case lists the **behavior** an implementer must produce.
 - Behavior: the host dashboard shows an error and a manual start control; the
   backend playback state does not deadlock — the host can skip/advance/retry.
 
+### E25. Participant queues multiple songs (round assignment)
+- Behavior: each song is round-scoped (one non-terminal entry per participant per
+  round). The first song goes into the current round; later songs go one round
+  above the participant's highest round, so they are invisible in the queue until
+  every participant's earlier songs are done. Submissions beyond the per-participant
+  cap (B15) are rejected with a clear message. See §4.
+
 ## 9. Behavioral rules (implementer-facing)
 
 > These are the normative rules extracted from the flows and edge cases. Every rule
@@ -385,33 +400,42 @@ Every edge case lists the **behavior** an implementer must produce.
 - **B5.** Invalid YouTube URLs cannot be queued. (`plan.md` §5 rule 8)
 - **B6.** Long videos produce a warning, never automatic rejection.
   (`plan.md` §5 rule 9; `plan.md` §1.5)
-- **B7.** Queue order is authoritative backend state derived from entry creation
-  order. No mutable position field. (`plan.md` §5 rule 10)
+- **B7.** Queue order is authoritative backend state: the active queue is the
+  current round's entries, one song per participant, in **stable participant
+  order** (earliest first engagement), with no mutable position field.
+  (`plan.md` §5 rule 10; decisions D8/D43)
 - **B8.** Host playback is authoritative for actual song playback. Participant
   devices never play audio. (`plan.md` §5 rule 11; §1.6)
 - **B9.** Automatic advancement is a fallback/normal path that the host can always
   override (skip, finish, pause, manually start another entry).
   (`plan.md` §5 rules 4, 12; §M13)
 - **B10.** A session contains multiple rounds; do not create a new session per
-  round. (`plan.md` §5 rule 13; §M16)
-- **B11.** At round completion, participants are asked whether they want the next
-  round; default answer is YES; explicit NO excludes them.
-  (`plan.md` §5 rules 14–16)
+  round. Rounds advance automatically (M10.1).
+  (`plan.md` §5 rule 13; §M16)
+- **B11.** There is no next-round enrollment: when a round's queue is exhausted
+  the next round begins automatically. A participant opts out by cancelling
+  their remaining songs.
+  (`plan.md` §5 rules 14–16; decisions D44)
 - **B12.** Realtime events are delivery, not truth; reconnecting clients must
   resync from the backend. (`plan.md` §5 rules 17, 18; §M10)
 - **B13.** The application must remain usable if realtime connections fail.
   (`plan.md` §5 rule 20)
 - **B14.** Nicknames are required, trimmed, 1–20 characters, unique per session
   (case-insensitive). (Decision D16)
-- **B15.** A participant's **active-entry limit** is 2 non-terminal entries
-  (WAITING + NEXT + SINGING) in the current round. Submissions beyond that are
-  rejected with a clear message. (Decision D17; enforcement hardened in M17)
+- **B15.** A participant may queue at most **`KARAOKE_QUEUE_MAX_SONGS_PER_PARTICIPANT`**
+  non-terminal songs **total** (across all rounds; default 5). Submissions beyond
+  the cap are rejected with a clear message. (Decision D45; enforcement hardened
+  in M17)
 - **B16.** Duplicate songs are allowed; an informational notice is shown, never a
   block. (Decision D15)
 - **B17.** Sessions are not tied to a live browser connection; closing the host
   browser does not end the session. (Decision D18)
 - **B18.** "Skip" marks the current entry `SKIPPED`; "manually advance" marks it
   `COMPLETED`. Both advance to the next entry immediately. (Decision D20)
+- **B19.** At most one non-terminal entry per participant per round. A new song
+  goes to the **current round** when the participant has no non-terminal entry
+  there, otherwise to the **next round above their highest round**.
+  (Decision D43)
 
 ## 10. Playback and automation behavior
 
@@ -426,6 +450,10 @@ NEXT
   -> COOLDOWN    (post-song cooldown)
   -> NEXT
 ```
+
+When the current round's queue is exhausted, the backend advances into the next
+round's first entry (M10.1): a round boundary is just another transition in this
+chain, with no enrollment step.
 
 Configuration (per session, defaults per `plan.md` §M13):
 
@@ -453,8 +481,6 @@ in the participant queue screen; optionally a browser notification where permitt
 - **"You're next"**: shown when the participant's entry is promoted to `NEXT` and
   again at countdown start (timing configurable, §10).
 - Message: `You're next! Get ready: <song> — <channel>`.
-- **Next-round prompt**: in-app prompt at round completion with YES / NO buttons
-  (default YES).
 - Web Push is a **later** milestone (M15) and is not part of the M1 contract.
 
 ## 12. Non-goals (MVP)

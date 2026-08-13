@@ -1,9 +1,15 @@
-"""Queue management use-cases (M7).
+"""Queue management use-cases (M7; round-robin engine at M10.1).
 
-The authoritative queue engine: submissions (with the active-entry limit and
-duplicate notice), public snapshots with computed positions, participant
-cancellation, and host removal/URL editing. Ordering is derived from entry
-creation (decision D8) — no mutable position field.
+The authoritative queue engine: submissions (with the per-participant song cap
+and duplicate notice), public snapshots of the current round with computed
+positions, participant cancellation, and host removal/URL editing.
+
+Since M10.1 (decisions D43–D45) the queue is **round-robin**: round N holds one
+song per participant (their N-th song); the active queue is the current round's
+non-terminal entries ordered by the **stable participant order** (each
+participant's earliest submission); the active round is derived (the
+lowest-numbered round with a non-terminal entry) and advances automatically when
+it empties.
 """
 
 import uuid
@@ -12,7 +18,9 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
+from app.core.config import get_settings
 from app.domain.queue_entry import QueueEntryStatus
 from app.models.participant import Participant
 from app.models.queue_entry import QueueEntry
@@ -22,15 +30,12 @@ from app.models.youtube_video import YouTubeVideo
 from app.schemas.youtube import YouTubeVideoData
 from app.services.session import SessionNotFoundError, session_service
 
-#: Maximum non-terminal entries per participant per round (B15/D17).
-ACTIVE_ENTRY_LIMIT = 2
-
 #: Informational notice for a duplicate song (B16/D15 — never a block).
 DUPLICATE_NOTICE = "This song is already in the queue."
 
 
-class ActiveEntryLimitError(Exception):
-    """Raised when a participant already has the max active entries (B15)."""
+class SongLimitError(Exception):
+    """Raised when a participant has reached the total song cap (B15/D45)."""
 
 
 class EntryNotFoundError(Exception):
@@ -42,7 +47,7 @@ class EntryNotCancellableError(Exception):
 
 
 class QueueService:
-    """Application service for the queue."""
+    """Application service for the round-robin queue."""
 
     async def submit(
         self,
@@ -50,32 +55,35 @@ class QueueService:
         participant: Participant,
         data: YouTubeVideoData,
     ) -> tuple[QueueEntry, bool]:
-        """Create a WAITING entry in the current round.
+        """Queue a song and return ``(entry, duplicate)``.
 
-        Returns ``(entry, duplicate)`` where ``duplicate`` is True when the
-        same video is already queued in the round (informational only, B16).
-        Raises ``ActiveEntryLimitError`` at the per-round limit (B15/D17).
+        The entry is assigned to a round (D43): the current round when the
+        participant has no non-terminal entry there, otherwise the next round
+        above their highest round. ``duplicate`` is True when the same video is
+        already queued anywhere in the session (informational only, B16).
+        Raises ``SongLimitError`` at the per-participant total cap (B15/D45).
         """
-        karaoke_round = await self._current_round(session, participant.session_id)
-
-        active_count = await session.scalar(
+        cap = get_settings().queue_max_songs_per_participant
+        total = await session.scalar(
             select(func.count(QueueEntry.id)).where(
-                QueueEntry.round_id == karaoke_round.id,
+                QueueEntry.session_id == participant.session_id,
                 QueueEntry.participant_id == participant.id,
                 QueueEntry.status.in_(QueueEntryStatus.non_terminal()),
             )
         )
-        if (active_count or 0) >= ACTIVE_ENTRY_LIMIT:
-            raise ActiveEntryLimitError(
-                f"you already have {ACTIVE_ENTRY_LIMIT} active songs in this round"
+        if (total or 0) >= cap:
+            raise SongLimitError(
+                f"you can have at most {cap} songs in the queue"
             )
+
+        karaoke_round = await self._target_round(session, participant)
 
         duplicate = (
             await session.scalar(
                 select(QueueEntry.id)
                 .join(YouTubeVideo, QueueEntry.youtube_video_id == YouTubeVideo.id)
                 .where(
-                    QueueEntry.round_id == karaoke_round.id,
+                    QueueEntry.session_id == participant.session_id,
                     QueueEntry.status.in_(QueueEntryStatus.non_terminal()),
                     YouTubeVideo.youtube_video_id == data.video_id,
                 )
@@ -99,19 +107,75 @@ class QueueService:
     ) -> list[QueueEntry]:
         """Return the current round's non-terminal entries in queue order.
 
-        Ordered by (created_at, id): creation order with a deterministic
-        tie-break (E19).
+        The current round is the lowest-numbered round with a non-terminal entry
+        (derived, D43). Order is the stable participant order — each
+        participant's earliest submission time — with ``created_at``/``id`` as
+        the deterministic tie-break (D8/D36).
         """
-        karaoke_round = await self._current_round(session, session_id)
-        result = await session.scalars(
-            select(QueueEntry)
-            .where(
-                QueueEntry.round_id == karaoke_round.id,
-                QueueEntry.status.in_(QueueEntryStatus.non_terminal()),
+        karaoke_round = await self._active_round(session, session_id)
+        if karaoke_round is None:
+            return []
+        outer = aliased(QueueEntry)
+        first_times = (
+            select(
+                QueueEntry.participant_id,
+                func.min(QueueEntry.created_at).label("first_at"),
             )
-            .order_by(QueueEntry.created_at, QueueEntry.id)
+            .where(QueueEntry.session_id == session_id)
+            .group_by(QueueEntry.participant_id)
+            .subquery()
+        )
+        result = await session.scalars(
+            select(outer)
+            .join(
+                first_times,
+                first_times.c.participant_id == outer.participant_id,
+            )
+            .where(
+                outer.round_id == karaoke_round.id,
+                outer.status.in_(QueueEntryStatus.non_terminal()),
+            )
+            .order_by(first_times.c.first_at, outer.created_at, outer.id)
         )
         return list(result)
+
+    async def get_participant_entries(
+        self, session: AsyncSession, participant: Participant
+    ) -> list[QueueEntry]:
+        """Return a participant's own non-terminal entries across all rounds.
+
+        Ordered by round number then submission order: the entry in the current
+        round (if any) comes first, followed by upcoming songs for later rounds
+        (M10.1 "my songs").
+        """
+        result = await session.scalars(
+            select(QueueEntry)
+            .join(Round, QueueEntry.round_id == Round.id)
+            .where(
+                QueueEntry.session_id == participant.session_id,
+                QueueEntry.participant_id == participant.id,
+                QueueEntry.status.in_(QueueEntryStatus.non_terminal()),
+            )
+            .order_by(Round.number, QueueEntry.created_at, QueueEntry.id)
+        )
+        return list(result)
+
+    async def get_current_round_number(
+        self, session: AsyncSession, session_id: uuid.UUID
+    ) -> int:
+        """Return the active round number for display.
+
+        The active round is the lowest-numbered round with a non-terminal entry;
+        when the queue is empty the highest round that exists is returned (1 for
+        a fresh session).
+        """
+        active = await self._active_round(session, session_id)
+        if active is not None:
+            return active.number
+        highest = await session.scalar(
+            select(func.max(Round.number)).where(Round.session_id == session_id)
+        )
+        return highest if highest is not None else 1
 
     async def get_entry(
         self, session: AsyncSession, entry_id: uuid.UUID
@@ -132,8 +196,9 @@ class QueueService:
     ) -> QueueEntry:
         """Cancel the participant's own WAITING entry (B3).
 
-        Returns the updated entry (the caller needs its ``session_id`` to
-        publish the realtime ``QueueUpdated`` event).
+        Works for any of the participant's own WAITING entries — the current
+        round or a future round (M10.1). Returns the updated entry so callers
+        can publish the realtime ``QueueUpdated`` event.
         """
         entry = await self.get_entry(session, entry_id)
         if (
@@ -194,18 +259,103 @@ class QueueService:
         await session.refresh(entry, attribute_names=["youtube_video"])
         return entry
 
-    async def _current_round(
+    # --- Round-robin internals --------------------------------------------------
+
+    async def _active_round(
         self, session: AsyncSession, session_id: uuid.UUID
-    ) -> Round:
-        """Return the latest round of a session (round 1 exists per session)."""
-        karaoke_round = await session.scalar(
+    ) -> Round | None:
+        """Return the lowest-numbered round with a non-terminal entry, or None."""
+        return await session.scalar(
             select(Round)
-            .where(Round.session_id == session_id)
-            .order_by(Round.number.desc())
+            .join(QueueEntry, QueueEntry.round_id == Round.id)
+            .where(
+                Round.session_id == session_id,
+                QueueEntry.status.in_(QueueEntryStatus.non_terminal()),
+            )
+            .order_by(Round.number.asc())
             .limit(1)
         )
-        if karaoke_round is None:
-            raise SessionNotFoundError(session_id)
+
+    async def _target_round(
+        self, session: AsyncSession, participant: Participant
+    ) -> Round:
+        """Return the round a new song should be assigned to (B19/D43)."""
+        active = await self._active_round(session, participant.session_id)
+        if active is not None:
+            has_in_active = await session.scalar(
+                select(QueueEntry.id).where(
+                    QueueEntry.round_id == active.id,
+                    QueueEntry.participant_id == participant.id,
+                    QueueEntry.status.in_(QueueEntryStatus.non_terminal()),
+                )
+            )
+            if has_in_active is None:
+                return active
+            highest = await self._participant_highest_round(session, participant)
+            return await self._get_or_create_round(
+                session, participant.session_id, highest + 1
+            )
+        # Nothing is waiting anywhere. A fresh session's first songs belong to
+        # round 1; after a round has ever held entries, a new song starts the
+        # next numbered round (a fresh cycle).
+        highest_with_entries = await session.scalar(
+            select(func.max(Round.number))
+            .join(QueueEntry, QueueEntry.round_id == Round.id)
+            .where(Round.session_id == participant.session_id)
+        )
+        number = (
+            1 if highest_with_entries is None else highest_with_entries + 1
+        )
+        return await self._get_or_create_round(
+            session, participant.session_id, number
+        )
+
+    async def _participant_highest_round(
+        self, session: AsyncSession, participant: Participant
+    ) -> int:
+        """Return the highest round number the participant has an entry in."""
+        highest = await session.scalar(
+            select(func.max(Round.number))
+            .join(QueueEntry, QueueEntry.round_id == Round.id)
+            .where(
+                Round.session_id == participant.session_id,
+                QueueEntry.participant_id == participant.id,
+            )
+        )
+        return highest if highest is not None else 0
+
+    async def _get_or_create_round(
+        self, session: AsyncSession, session_id: uuid.UUID, number: int
+    ) -> Round:
+        """Return the round with ``number`` for the session, creating it if new.
+
+        Round 1 is created with the session (D35); later rounds are created
+        lazily when the first entry is assigned to them (D43). Handles the
+        concurrent-insert race on the unique ``(session_id, number)``
+        constraint by rolling back and re-selecting the winner (same pattern as
+        ``_get_or_create_video``).
+        """
+        karaoke_round = await session.scalar(
+            select(Round).where(
+                Round.session_id == session_id, Round.number == number
+            )
+        )
+        if karaoke_round is not None:
+            return karaoke_round
+        karaoke_round = Round(session_id=session_id, number=number)
+        session.add(karaoke_round)
+        try:
+            await session.flush()
+        except IntegrityError as exc:
+            await session.rollback()
+            karaoke_round = await session.scalar(
+                select(Round).where(
+                    Round.session_id == session_id, Round.number == number
+                )
+            )
+            if karaoke_round is None:
+                raise  # pragma: no cover - unique constraint guarantees a winner
+            return karaoke_round
         return karaoke_round
 
     async def _get_or_create_video(

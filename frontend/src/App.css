@@ -208,9 +208,9 @@ button.link-button {
   color: var(--paused-text);
 }
 
-.badge-round_complete {
+.badge-round {
   background: var(--surface-3);
-  color: var(--muted);
+  color: var(--text);
 }
 
 .badge-ended {

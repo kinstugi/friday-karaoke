@@ -20,5 +20,5 @@ class QueueEntryStatus(str, Enum):
 
     @classmethod
     def non_terminal(cls) -> frozenset["QueueEntryStatus"]:
-        """Statuses that count toward the active-entry limit (B15/D17)."""
+        """Statuses that count toward the per-participant cap (B15/D45)."""
         return frozenset({cls.WAITING, cls.NEXT, cls.SINGING})

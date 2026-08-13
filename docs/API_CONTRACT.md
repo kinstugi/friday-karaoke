@@ -114,11 +114,12 @@ Session creation returns `id`, `name`, `joinCode`, a QR-friendly `joinUrl`, and
 `status`. Session state is a `SessionStatus` enum:
 
 ```text
-CREATED -> ACTIVE <-> PAUSED -> ROUND_COMPLETE -> ENDED
+CREATED -> ACTIVE <-> PAUSED -> ENDED
 ```
 
-`ENDED` is reachable from any other state; `PAUSED`/`ROUND_COMPLETE` are
-reachable in later milestones (M14/M16). Invalid transitions return `409`.
+`ENDED` is reachable from any other state; `PAUSED` becomes reachable at M14.
+`ROUND_COMPLETE` was removed at M10.1 (rounds auto-advance, no enrollment).
+Invalid transitions return `409`.
 Accessing a session that does not exist *or belongs to another host* returns
 `404 session not found` (no existence leak, decision D29).
 
@@ -238,23 +239,31 @@ POST /api/v1/sessions/{id}/entries            Authorization: Bearer <participant
   "duplicate": false,                    # true when the same video is already queued (B16)
   "notice": null                         # "This song is already in the queue." when duplicate
 }
-401 / 404 (wrong session) / 409 (ended session, or active-entry limit B15) / 422 (bad URL)
+401 / 404 (wrong session) / 409 (ended session, or per-participant cap B15) / 422 (bad URL)
 404 { "detail": "we couldn't load this video" }   # E4
 ```
 
-### Queue snapshot (M7)
+The entry is assigned to a round at submission (D43): the current round when the
+participant has no non-terminal entry there, otherwise the next round above their
+highest round. `position` is `null` for future-round entries (not yet in the
+active queue).
+
+### Queue snapshot (M7, round-scoped at M10.1)
 
 ```text
 GET /api/v1/sessions/{id}/entries                # public, no auth
 200 {
   "session_id": "...",
-  "status": "CREATED",
-  "queue": [ { ...QueueEntryResponse as above, "position": 1 }, ... ]   # creation order, D8
-}
+  "status": "ACTIVE",
+  "round_number": 2,                             # active round (M10.1)
+  "queue": [ { ...QueueEntryResponse as above, "position": 1 }, ... ]
+}                                                # current round, stable participant order (D43)
 404 { "detail": "session not found" }
 ```
 
-Positions are computed from the authoritative creation order (D8); there is no
+Positions are computed within the current round from the authoritative stable
+participant order (each participant's earliest submission time; decision D43);
+future-round songs are not part of the snapshot and have no position. There is no
 mutable position field. The snapshot is sanitized (no host identity, no
 participant tokens).
 
@@ -276,7 +285,10 @@ PATCH /api/v1/entries/{entryId}/video   Authorization: Bearer <host token>
 
 Cross-actor semantics: the same DELETE path means "cancel own entry" for a
 participant and "remove any entry" for a host (decision D37); unknown entries or
-entries outside the actor's reach return 404 (no existence leak).
+entries outside the actor's reach return 404 (no existence leak). Since M10.1
+(D43) cancelling works for **any** of the participant's own WAITING entries,
+including songs assigned to future rounds (they leave their round; the queue is
+unchanged because they were never in the active queue).
 
 ### Preview (M6) — IMPLEMENTED
 
@@ -337,12 +349,15 @@ POST /sessions/{id}/entries
 | POST   | /sessions/{id}/play/resume | host | Resume progression      |
 | POST   | /sessions/{id}/next        | host | Manually advance queue  |
 
-## 7. Rounds (M16)
+## 7. Rounds (revised at M10.1)
 
-| Method | Path                          | Auth | Description                    |
-| ------ | ----------------------------- | ---- | ------------------------------ |
-| POST   | /rounds/{roundId}/enroll      | participant | Yes/No for next round   |
-| POST   | /sessions/{id}/rounds/start   | host | Start next round               |
+The M1/M16 enrollment endpoints (`/rounds/{roundId}/enroll`, host "start next
+round") are **removed**: rounds auto-advance (decision D44) and there is no
+enrollment. The round number is surfaced in the queue snapshot
+(`round_number`, M10.1) and the realtime `QueueUpdated` event. A participant
+cancels their remaining songs to drop out (existing `DELETE /api/v1/entries/{id}`,
+B3). Remaining round-lifecycle concerns (absent-participant cleanup, round/session
+summaries) are tracked in plan.md §M16.
 
 ## 8. Realtime (WebSocket, M10) — IMPLEMENTED (QueueUpdated / ParticipantJoined / SessionUpdated)
 
@@ -370,8 +385,9 @@ host edit. `ParticipantJoined` fires when someone registers in the session;
 
 The other events in the original target list (`SingerStarted`, `SingerFinished`,
 `SingerSkipped`, `ParticipantRemoved`, `RoundStarted`, `RoundCompleted`,
-`SessionPaused`, `SessionResumed`) are not emitted until their milestones
-create the producing code paths (M11/M13/M14/M16).
+`SessionPaused`, `SessionResumed`) are not emitted. Round advances are visible
+through `round_number` in the `QueueUpdated` snapshot (M10.1 — no dedicated
+round event); singer events arrive at M11/M13 and pause/resume at M14.
 
 Rules:
 
@@ -385,6 +401,7 @@ Rules:
 {
   "sessionId": "uuid",
   "status": "ACTIVE",
+  "roundNumber": 2,
   "currentSinger": { "participantName": "Alice", "songTitle": "...", "entryId": "uuid" },
   "upNext": { "participantName": "Bob", "songTitle": "...", "entryId": "uuid" },
   "queue": [ { "entryId": "uuid", "participantName": "...", "songTitle": "...",
@@ -393,4 +410,5 @@ Rules:
 }
 ```
 
-Exact shape is finalized when the queue APIs are implemented (M7).
+Exact shape is finalized when the queue APIs are implemented (M7); M10.1 adds
+`round_number` (the active round) to the public snapshot.

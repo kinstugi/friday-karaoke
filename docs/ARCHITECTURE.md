@@ -92,14 +92,17 @@ Implementation status at M6:
   participant tokens (M5).
 - **Domain:** `SessionStatus` enum + transition rules (`app/domain/session.py`,
   M4) mirroring the documented lifecycle
-  `CREATED -> ACTIVE <-> PAUSED -> ROUND_COMPLETE -> ENDED`; `ENDED` is terminal
-  and reachable from any other state.
+  `CREATED -> ACTIVE <-> PAUSED -> ENDED`; `ENDED` is terminal
+  and reachable from any other state. (`ROUND_COMPLETE` existed until M10.1,
+  when rounds became automatic — see `docs/PRODUCT_SPEC.md` §3 and DECISIONS D44.)
 - **Services:** `HostAuthService` (M3), `SessionService` (M4: create/get/start/
   end, unique join codes, creates round 1), `ParticipantService` (M5: public
   session lookup, participant registration, token lookup), `YouTubeService` (M6:
   Data API v3 metadata fetch, URL validation, duration parsing), `QueueService`
   (M7: submit with limit + duplicate notice, snapshots with computed positions,
-  cancel/remove, host URL editing).
+  cancel/remove, host URL editing). At M10.1 `QueueService` becomes the
+  round-robin engine: round assignment on submit, derived active round,
+  stable participant ordering, per-participant total cap.
 - **API:** health at root; host auth under `/api/v1/auth/host` (M3); sessions
   under `/api/v1/sessions` (create/get/**list (M9)**/start/end + SVG QR, M4/M5); public join
   under `/api/v1/join` (M5); song endpoints under `/api/v1/sessions/{id}/entries`
@@ -241,7 +244,13 @@ get correct state from the API.
   `RealtimeHub` fan-out, typed events (`QueueUpdated` full snapshot /
   `ParticipantJoined` / `SessionUpdated`), and frontend subscription with
   fallback polling while disconnected (B13).
-- **M11–M16** — playback + rounds + notifications.
+- **M10.1** — queue rounds + auto-advance (complete): round-robin queue — one
+  song per participant per round, stable participant order, derived active round
+  that auto-advances, `ROUND_COMPLETE`/enrollment removed, per-participant cap
+  (default 5, configurable) (D43–D45). No schema migration: entries were already
+  round-scoped; ordering/round-assignment/limit logic changed in the queue
+  service. `QueueUpdated` snapshots carry `round_number`.
+- **M11–M16** — playback + round lifecycle cleanup + notifications.
 - **M17–M19** — security, testing, PWA/mobile UX.
 - **M20–M22** — deployment, pilot, fixes.
 

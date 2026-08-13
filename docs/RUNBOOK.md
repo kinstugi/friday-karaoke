@@ -156,15 +156,16 @@ cd ../frontend && npm install && npm run build && npm run typecheck && npm run l
 ```
 
 This satisfies the M7 acceptance criteria: multiple participants submit and the
-public snapshot returns the queue in deterministic submission order with
-computed positions. The active-entry limit (2), duplicate-song notice, participant
-cancel of own WAITING entries, and host remove/edit are enforced server-side.
-The M8 participant screens (join/submit/queue) render exactly these backend
-responses; the M9 host dashboard (auth, home, dashboard) renders the session and
-queue state and drives the host actions (start/remove/edit/end) through the same
-backend. Skip/finish/pause/resume are visible but disabled until the M11 playback
-state machine lands. Health, host auth, sessions, join, and preview endpoints
-from M2-M6 are unchanged.
+public snapshot returns the current round's queue with computed positions
+(round-scoped and in stable participant order since M10.1). The per-participant
+song cap (5), duplicate-song notice, participant cancel of own WAITING entries
+(any round), and host remove/edit are enforced server-side. The M8 participant
+screens (join/submit/queue) render exactly these backend responses; the M9 host
+dashboard (auth, home, dashboard) renders the session and queue state and drives
+the host actions (start/remove/edit/end) through the same backend.
+Skip/finish/pause/resume are visible but disabled until the M11 playback state
+machine lands. Health, host auth, sessions, join, and preview endpoints from
+M2-M6 are unchanged.
 
 ## UI polish verification (M9.1)
 
@@ -221,6 +222,45 @@ EOF
 - WebSockets are delivery only (D5): after a reconnect the client re-fetches
   authoritative state, and both screens fall back to 5 s polling while the
   socket is down (B13).
+
+## Queue rounds verification (M10.1)
+
+The queue is round-robin: one song per participant per round, in stable
+participant order, with rounds auto-advancing (no enrollment). With a YouTube
+key set in `backend/.env`, from `backend/`:
+
+```bash
+uv run python - <<'EOF'
+import uuid, httpx
+BASE = "http://localhost:8000"
+email = f"rnd-{uuid.uuid4().hex[:8]}@school.edu"
+c = httpx.Client(timeout=30)
+c.post(f"{BASE}/api/v1/auth/host/register", json={"email": email, "password": "correct-horse-battery"})
+host = c.post(f"{BASE}/api/v1/auth/host/login", json={"email": email, "password": "correct-horse-battery"}).json()["token"]
+hh = {"Authorization": f"Bearer {host}"}
+session = c.post(f"{BASE}/api/v1/sessions", json={}, headers=hh).json()
+sid, code = session["id"], session["join_code"]
+def join(n): return c.post(f"{BASE}/api/v1/join/{code}/participants", json={"nickname": n}).json()["token"]
+def submit(t, v): return c.post(f"{BASE}/api/v1/sessions/{sid}/entries",
+    json={"youtube_url": f"https://youtu.be/{v}"}, headers={"Authorization": f"Bearer {t}"}).json()
+alice, bob = join("Alice"), join("Bob")
+a1, a2, b1 = submit(alice, "dQw4w9WgXcQ"), submit(alice, "9bZkp7q19f0"), submit(bob, "dQw4w9WgXcQ")
+print("alice song2 position (expect None):", a2["entry"]["position"])
+snap = c.get(f"{BASE}/api/v1/sessions/{sid}/entries").json()
+print("round 1 queue (expect Alice, Bob):", [e["participant_name"] for e in snap["queue"]])
+mine = c.get(f"{BASE}/api/v1/sessions/{sid}/entries/mine", headers={"Authorization": f"Bearer {alice}"}).json()
+print("alice songs (A pos 1, B None):", [(e["video_id"][:6], e["position"]) for e in mine])
+for e in snap["queue"]: c.delete(f"{BASE}/api/v1/entries/{e['id']}", headers=hh)
+snap2 = c.get(f"{BASE}/api/v1/sessions/{sid}/entries").json()
+print("round after exhaustion (expect 2, [Alice]):", snap2["round_number"],
+      [e["participant_name"] for e in snap2["queue"]])
+EOF
+```
+
+- The `KARAOKE_QUEUE_MAX_SONGS_PER_PARTICIPANT` cap (default 5) is enforced
+  (6th song → 409 "you can have at most 5 songs in the queue").
+- Round-robin assignment/ordering/auto-advance are covered by
+  `backend/tests/test_queue.py` (9 new round tests).
 
 ## Branch / commit workflow
 

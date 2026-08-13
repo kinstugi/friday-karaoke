@@ -6,7 +6,6 @@ export type SessionStatus =
   | 'CREATED'
   | 'ACTIVE'
   | 'PAUSED'
-  | 'ROUND_COMPLETE'
   | 'ENDED'
 
 export type QueueEntryStatus =
@@ -66,6 +65,7 @@ export interface QueueEntry {
 export interface QueueSnapshot {
   session_id: string
   status: SessionStatus
+  round_number: number
   queue: QueueEntry[]
 }
 

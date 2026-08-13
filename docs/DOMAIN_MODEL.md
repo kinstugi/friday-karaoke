@@ -76,7 +76,7 @@ One pass through the queue within a session.
 id
 sessionId
 number           # 1-based round number
-status           # RoundStatus (implied by SessionStatus/queue state; formalized in M16)
+status           # RoundStatus (implied by session/queue state; not stored — M10.1)
 startedAt
 endedAt
 ```
@@ -119,9 +119,11 @@ thumbnailUrl
 CREATED          # session exists, not yet started
 ACTIVE           # running
 PAUSED           # automatic progression paused (host-controlled)
-ROUND_COMPLETE   # current round finished; awaiting next-round enrollment
 ENDED            # session finished
 ```
+
+`ROUND_COMPLETE` was removed at M10.1: rounds advance automatically while the
+session is `ACTIVE` (no enrollment).
 
 ### QueueEntryStatus
 
@@ -160,24 +162,42 @@ NEXT
 
 The host can interrupt transitions at any point.
 
-## 4. Round system (target, M16)
+## 4. Round system (revised at M10.1)
 
 - A Session contains multiple Rounds; never create a new session per round.
-- When a round's queue is exhausted, the round completes.
-- Participants are asked "Join next round?"; default answer is **YES**.
-- Explicit **NO** excludes the participant from the next round.
-- Disconnected/absent participants should not silently remain forever
-  (cleanup strategy defined in a later milestone).
+- Round N holds **one song per participant** (their N-th song). At most one
+  non-terminal entry per participant per round.
+- When a round's queue is exhausted, the round completes and the session advances
+  **automatically** to the next round that has entries (participants' next songs).
+  There is **no enrollment prompt** and no `ROUND_COMPLETE` state.
+- The **active round is derived** from queue state (the lowest-numbered round with
+  a non-terminal entry), never stored as a mutable counter.
+- Ordering within a round is the **stable participant order**: each participant's
+  earliest submission time (`MIN(created_at)`), fixed once and repeated every
+  round; `created_at` + `id` are the deterministic tie-break.
+- Round assignment: a participant's first song goes into the current round;
+  subsequent songs go one round above their highest round. A late joiner's first
+  song is appended to the current round.
+- Participants whose songs run out do not appear in later rounds; a participant
+  opts out by cancelling their remaining songs.
+- Disconnected/absent participants should not silently remain forever (cleanup
+  strategy defined in M16).
 
 ## 5. Business rules that constrain the model
 
 1. A participant can exist only within a session (v1).
-2. Queue order is determined by authoritative backend state — the creation order
-   of entries, not a mutable position field.
-3. A participant may cancel their own WAITING entry.
+2. Queue order is determined by authoritative backend state: the active queue is
+   the current round's entries, one song per participant, in stable participant
+   order (earliest first engagement). No mutable position field.
+3. A participant may cancel their own WAITING entry (current or upcoming round).
 4. The host may remove any entry and edit the YouTube URL of an entry
    (participant stays in the queue).
 5. A participant cannot modify another participant's entry.
-6. One participant has a reasonable active-entry limit (enforced later).
+6. One participant has a per-participant **total** song cap (default 5,
+   configurable via `KARAOKE_QUEUE_MAX_SONGS_PER_PARTICIPANT`), enforced
+   server-side.
 7. Invalid YouTube URLs cannot become QueueEntries.
 8. Long videos produce a warning, never automatic rejection.
+9. A participant has at most one non-terminal entry per round; a new song goes to
+   the current round if the participant has no non-terminal entry there,
+   otherwise to the next round above their highest round.

@@ -48,8 +48,13 @@ class SongSubmitResponse(BaseModel):
 
 
 class QueueSnapshotResponse(BaseModel):
-    """Public, sanitized queue view (no host identity, no participant tokens)."""
+    """Public, sanitized queue view (no host identity, no participant tokens).
+
+    ``round_number`` is the active round (M10.1, D43): the round currently being
+    sung, or the highest round that exists when the queue is empty.
+    """
 
     session_id: uuid.UUID
     status: SessionStatus
+    round_number: int
     queue: list[QueueEntryResponse]

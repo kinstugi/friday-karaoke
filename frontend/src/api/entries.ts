@@ -29,6 +29,17 @@ export function fetchQueueSnapshot(sessionId: string): Promise<QueueSnapshot> {
   return apiRequest<QueueSnapshot>(`/api/v1/sessions/${sessionId}/entries`)
 }
 
+/** The participant's own queued songs: the current-round entry (with position)
+ *  followed by upcoming songs for later rounds (M10.1, position null). */
+export function fetchMyEntries(
+  sessionId: string,
+  token: string,
+): Promise<QueueEntry[]> {
+  return apiRequest<QueueEntry[]>(`/api/v1/sessions/${sessionId}/entries/mine`, {
+    token,
+  })
+}
+
 export function cancelEntry(entryId: string, token: string): Promise<void> {
   return apiRequest<void>(`/api/v1/entries/${entryId}`, {
     method: 'DELETE',

@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, Navigate, useParams } from 'react-router-dom'
 
-import { cancelEntry, fetchQueueSnapshot } from '../../api/entries'
+import { cancelEntry, fetchMyEntries, fetchQueueSnapshot } from '../../api/entries'
 import type { QueueEntry, QueueSnapshot } from '../../api/types'
 import { formatDuration } from '../../lib/format'
 import { statusLabel } from '../../lib/session'
@@ -22,16 +22,33 @@ export default function QueueScreen() {
   const [identity] = useState(loadIdentity)
 
   const [snapshot, setSnapshot] = useState<QueueSnapshot | null>(null)
+  const [mySongs, setMySongs] = useState<QueueEntry[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [connected, setConnected] = useState(false)
 
   const refresh = useCallback(async () => {
     if (!identity) return
     try {
-      setSnapshot(await fetchQueueSnapshot(identity.sessionId))
+      const [snap, mine] = await Promise.all([
+        fetchQueueSnapshot(identity.sessionId),
+        fetchMyEntries(identity.sessionId, identity.token),
+      ])
+      setSnapshot(snap)
+      setMySongs(mine)
       setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load the queue')
+    }
+  }, [identity])
+
+  // Refresh only the participant's own songs (e.g. after a round advance the
+  // host may have processed an entry, removing it from the non-terminal list).
+  const refreshMySongs = useCallback(async () => {
+    if (!identity) return
+    try {
+      setMySongs(await fetchMyEntries(identity.sessionId, identity.token))
+    } catch {
+      // Snapshot errors are surfaced by refresh(); keep the last-known list.
     }
   }, [identity])
 
@@ -53,6 +70,7 @@ export default function QueueScreen() {
     onEvent: (event) => {
       if (event.type === 'QueueUpdated') {
         setSnapshot(event.snapshot)
+        void refreshMySongs()
       } else if (event.type === 'SessionUpdated') {
         // The snapshot carries the session status too; keep it in sync so the
         // ended banner appears without a queue mutation (M10).
@@ -97,9 +115,6 @@ export default function QueueScreen() {
   const upNext = snapshot.queue.find(
     (e) => e.id !== nowSinging?.id && e.status !== 'SINGING',
   )
-  const myEntries = snapshot.queue.filter(
-    (e) => e.participant_name === identity.nickname,
-  )
 
   return (
     <div className="screen">
@@ -108,9 +123,14 @@ export default function QueueScreen() {
         <Link to={`/join/${joinCode}/submit`}>+ Add Song</Link>
       </header>
 
-      <p className={`badge badge-${snapshot.status.toLowerCase()}`}>
-        {statusLabel(snapshot.status)}
-      </p>
+      <div className="row">
+        <p className={`badge badge-${snapshot.status.toLowerCase()}`}>
+          {statusLabel(snapshot.status)}
+        </p>
+        {!ended ? (
+          <p className="badge badge-round">Round {snapshot.round_number}</p>
+        ) : null}
+      </div>
 
       {ended ? (
         <div className="card">
@@ -169,10 +189,32 @@ export default function QueueScreen() {
             )}
           </section>
 
-          {myEntries.length > 0 ? (
-            <p className="muted">
-              Your position: {myEntries.map((e) => e.position).join(', ')}
-            </p>
+          {mySongs && mySongs.length > 0 ? (
+            <section className="queue">
+              <h2>Your songs</h2>
+              <ol className="queue-list">
+                {mySongs.map((entry) => (
+                  <li key={entry.id} className="mine">
+                    <span className="position">{entry.position ?? '—'}</span>
+                    <div className="entry-main">
+                      <strong>{entry.title}</strong>
+                      <span className="muted">
+                        {entry.position !== null ? 'This round' : 'Upcoming'}{' '}
+                        &middot; {formatDuration(entry.duration_seconds)}
+                      </span>
+                      {entry.status === 'WAITING' ? (
+                        <button
+                          className="link-button"
+                          onClick={() => void handleCancel(entry)}
+                        >
+                          Cancel
+                        </button>
+                      ) : null}
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </section>
           ) : null}
 
           {error ? <p className="error-text">{error}</p> : null}

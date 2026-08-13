@@ -11,8 +11,6 @@ export function statusLabel(status: SessionStatus): string {
       return 'Live'
     case 'PAUSED':
       return 'Paused'
-    case 'ROUND_COMPLETE':
-      return 'Round complete'
     case 'ENDED':
       return 'Ended'
   }

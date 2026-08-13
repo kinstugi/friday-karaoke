@@ -76,11 +76,15 @@ be appended as the project evolves.
 
 ## D8. Queue order by creation, not position fields
 
-- **Status:** Accepted
+- **Status:** Accepted (partly superseded at M10.1 by D43)
 - **Decision:** Queue ordering is derived from entry creation/order in authoritative
   backend state. No mutable `position` field.
 - **Rationale:** Eliminates a whole class of ordering bugs (two participants
   incrementing the same counter, reorder races). Position is computed when rendered.
+- **M10.1 revision (D43):** the queue is now round-robin — one song per participant
+  per round, ordered within a round by each participant's *earliest* submission
+  time (stable participant order). Creation order remains the source of the stable
+  order and the within-round tie-break; it no longer *directly* orders the queue.
 
 ## D9. Redis not required for first deployment
 
@@ -100,11 +104,13 @@ be appended as the project evolves.
 
 ## D11. Default next-round answer is YES
 
-- **Status:** Accepted
+- **Status:** Superseded at M10.1 by D44
 - **Decision:** At round completion, participants are asked whether they want the next
   round. If they do nothing, the answer is YES.
 - **Rationale:** The karaoke night flows with minimal friction; someone who wants out
   must explicitly say NO. (Disconnected participants get a cleanup strategy later.)
+- **M10.1 note:** removed entirely — rounds auto-advance with no enrollment prompt;
+  a participant opts out by cancelling their remaining songs (D44).
 
 ## D12. Tooling choices
 
@@ -160,12 +166,15 @@ These freeze MVP product behavior. They were captured in `docs/PRODUCT_SPEC.md`.
 
 ### D17. Active-entry limit per participant
 
-- **Status:** Accepted
+- **Status:** Superseded at M10.1 by D45
 - **Decision:** A participant may have at most **2 non-terminal entries**
   (WAITING + NEXT + SINGING) in the current round. Further submissions are
   rejected with a clear message.
 - **Rationale:** plan.md §M7 requires a reasonable active-entry limit. A concrete
   number avoids implementer guessing; enforcement is hardened in M17.
+- **M10.1 note:** replaced by a per-participant **total** song cap across all
+  rounds (default 5, configurable) once multiple rounds per participant became the
+  model (D45).
 
 ### D18. Sessions are not tied to a live browser connection
 
@@ -178,7 +187,7 @@ These freeze MVP product behavior. They were captured in `docs/PRODUCT_SPEC.md`.
 
 ### D19. Round transition behavior
 
-- **Status:** Accepted
+- **Status:** Superseded at M10.1 by D43/D44
 - **Decision:** A round completes when the queue has no remaining non-terminal
   entries. The session enters `ROUND_COMPLETE`, the enrollment prompt opens
   (default YES, explicit NO excludes), and the host starts the next round or ends
@@ -187,6 +196,9 @@ These freeze MVP product behavior. They were captured in `docs/PRODUCT_SPEC.md`.
   start.
 - **Rationale:** Deterministic, backend-computed ordering avoids races (E19) and
   gives participants an immediate position in the new round.
+- **M10.1 note:** enrollment is gone (D44). A round completes when its queue is
+  exhausted and the session advances automatically to the next round that has
+  entries; the next round's order is the stable participant order (D43).
 
 ### D20. Skip vs. manually advance
 
@@ -449,6 +461,10 @@ These freeze MVP product behavior. They were captured in `docs/PRODUCT_SPEC.md`.
 - **Rejected:** Omitting rounds until M16 (would leave `round_id` nullable or
   drop the documented field); auto-creating round 1 lazily on first submit
   (asymmetric — a session with no submissions has no round).
+- **M10.1 note (D43):** round 1 is still created with the session; later rounds
+  are created lazily when the first entry is assigned to them. The active
+  round is the *lowest-numbered* round with a non-terminal entry (not the
+  latest), and advances automatically.
 
 ## D36. Deterministic queue ordering: microsecond `created_at` + `id` tie-break
 
@@ -605,6 +621,71 @@ These freeze MVP product behavior. They were captured in `docs/PRODUCT_SPEC.md`.
   snapshot, but the contract documents a token and auth keeps a future
   host-only stream possible); Redis pub/sub (D9 — one worker today); publishing
   from services (keeps services pure; routes own the HTTP/socket boundary).
+
+---
+
+## M10.1 queue-round decisions
+
+## D43. Round-robin queue with stable participant order
+
+- **Status:** Accepted (revision of D8/D19)
+- **Decision:** Queue entries are round-scoped with at most one non-terminal
+  entry per participant per round. Round N holds each participant's N-th song.
+  The active queue is the **current round's** entries, ordered by the **stable
+  participant order** — each participant's earliest submission time
+  (`MIN(created_at)`), fixed once and repeated every round; `created_at` + `id`
+  are the deterministic tie-break. The active round is **derived** (the
+  lowest-numbered round with ≥ 1 non-terminal entry) and advances automatically
+  when it empties. A participant's first song goes into the current round;
+  subsequent songs go one round above their highest round. A late joiner's first
+  song is appended to the current round.
+- **Rationale:** Participants may queue several songs; a flat creation-order
+  queue let one participant's 2nd song jump ahead of someone's 1st. Round-robin
+  ("everyone's first song, then everyone's second") matches how a hosted karaoke
+  night actually runs, keeps the queue fair, and makes "moving to everyone's next
+  song" a natural, automatic round transition. Deriving the active round (rather
+  than storing a counter) keeps the backend the single source of truth (D2) and
+  avoids a mutable-state bug class, consistent with D8's "derive, don't store".
+  The stable order is fixed by first engagement so cancelling a song never
+  reorders the night.
+- **Rejected:** Flat creation-order queueing (unfair interleaving);
+  storing the active round number as a mutable session field (drift risk);
+  ordering within a round by that round's own submission times (unstable across
+  rounds — a participant who submits their 2nd song late would suddenly move
+  ahead/behind others in round 2).
+
+## D44. Rounds auto-advance; no next-round enrollment
+
+- **Status:** Accepted (supersedes D11)
+- **Decision:** Rounds advance automatically: when the current round's queue is
+  exhausted, the session moves to the next round that has entries — there is no
+  `ROUND_COMPLETE` state and no "Join the next round?" prompt. A participant
+  opts out by cancelling their remaining songs; participants whose songs run out
+  simply do not appear in later rounds.
+- **Rationale:** With round-robin ordering (D43), "the next round" is just
+  "everyone's next song", so an enrollment step adds friction with no value: a
+  participant who already queued songs clearly intends to sing them, and someone
+  who wants to stop cancels their own songs (B3). This also removes the
+  `ROUND_COMPLETE` session state, simplifying the state machine to
+  `CREATED -> ACTIVE <-> PAUSED -> ENDED`.
+- **Rejected:** Keeping the M1/M16 enrollment flow (default YES / explicit NO) —
+  an extra prompt and state for a decision the queue already encodes;
+  a `ROUND_COMPLETE` interstitial without enrollment (dead state, no purpose).
+
+## D45. Per-participant total song cap (configurable)
+
+- **Status:** Accepted (revision of D17)
+- **Decision:** A participant may queue at most
+  `KARAOKE_QUEUE_MAX_SONGS_PER_PARTICIPANT` non-terminal songs **total**, across
+  all rounds. Default **5**. Submissions beyond the cap are rejected with a clear
+  message; the duplicate-song notice (B16) is unchanged.
+- **Rationale:** The old "2 per current round" limit (D17) made no sense once
+  one song per round is the rule. A total cap bounds how much of the night one
+  participant can reserve (5 matches the planned pilot scale) while staying
+  configurable so the school can tune it without a redeploy (mirroring D34's
+  configurable threshold).
+- **Rejected:** No cap (one participant could clog a whole night);
+  keeping 2 (too small now that songs are round-scoped).
 
 ---
 

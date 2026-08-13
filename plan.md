@@ -272,13 +272,14 @@ M7  Queue management
 M8  Participant queue UI
 M9  Host dashboard
 M9.1 Frontend UI polish (design system + quality bar)
-M10 Realtime updates with SignalR
+M10 Realtime updates (WebSockets)
+M10.1 Queue rounds + auto-advance (round-robin queue)
 M11 Playback state machine
 M12 YouTube host player
 M13 Automatic song transitions
 M14 Host moderation + manual controls
 M15 Next-singer notifications
-M16 Round system
+M16 Round lifecycle cleanup + summaries (revised at M10.1)
 M17 Security + abuse protection
 M18 Testing + failure scenarios
 M19 PWA + mobile UX
@@ -377,7 +378,7 @@ At minimum:
 - host manually advances
 - queue becomes empty
 - round ends
-- participant does not answer next-round prompt
+- participant does not answer next-round prompt *(superseded at M10.1 — no enrollment)*
 
 ## Acceptance criteria
 
@@ -495,7 +496,7 @@ Possible statuses:
 CREATED
 ACTIVE
 PAUSED
-ROUND_COMPLETE
+ROUND_COMPLETE    # removed at M10.1 (rounds auto-advance; no enrollment)
 ENDED
 ```
 
@@ -648,7 +649,8 @@ REMOVED
 - Host can remove any entry.
 - Host can edit a YouTube URL.
 - Participant cannot modify another participant.
-- One participant should have a reasonable active-entry limit.
+- One participant should have a reasonable per-participant song cap (a total cap
+  across rounds, default 5; revised at M10.1).
 
 ## Acceptance criteria
 
@@ -792,6 +794,75 @@ If the host skips a singer, participant phones update almost immediately.
 
 ---
 
+# M10.1 — Queue Rounds + Auto-Advance
+
+## Goal
+
+Round-robin queue: each participant's songs play one round at a time — everyone's
+1st song, then everyone's 2nd song, and so on. One song per participant per round;
+rounds advance automatically; there is **no** next-round enrollment.
+
+## Background / motivation
+
+Participants may queue multiple songs (product decision, DECISIONS D43–D45). A
+flat creation-order queue lets one participant's 2nd song jump ahead of another
+participant's 1st. This milestone replaces that ordering (M1 rule B7 / decision
+D8) with a round model: round N holds each participant's N-th song, ordered by a
+**stable participant order** (the order in which participants first engaged,
+fixed once and repeated every round). Rounds auto-advance, so "moving to everyone's
+next song" IS the next round; the M16 enrollment prompt (default YES / explicit NO)
+is dropped.
+
+## Tasks
+
+- **Submit / round assignment:** a participant's new song goes to the current
+  round when they have no non-terminal entry there (first song, or rejoining the
+  round after a skip/cancel); otherwise it goes one round above their highest
+  round. At most one non-terminal entry per participant per round.
+- **Active round is derived:** the lowest-numbered round with ≥ 1 non-terminal
+  entry. When it empties, the session advances automatically to the next round
+  that has entries. No stored counter, no `ROUND_COMPLETE` state.
+- **Snapshot:** the active queue = the current round's non-terminal entries,
+  ordered by stable participant order (each participant's earliest submission
+  time, i.e. `MIN(created_at)`), then `created_at`/`id` as the deterministic
+  tie-break. Add the current `round_number` to the queue snapshot. Positions are
+  computed within the current round.
+- **Song cap:** replace the active-entry limit (2 per round, B15/D17) with a
+  per-participant **total** cap across all rounds, default 5, configurable via
+  `KARAOKE_QUEUE_MAX_SONGS_PER_PARTICIPANT`.
+- **No enrollment:** remove `ROUND_COMPLETE` from `SessionStatus` and its
+  transitions (`CREATED -> ACTIVE <-> PAUSED -> ENDED`). Participants opt out by
+  cancelling their remaining songs; the existing cancel endpoint already works
+  for any own WAITING entry, including future-round songs.
+- **Participant "my songs":** a participant-scoped endpoint listing their own
+  current + upcoming entries so the queue screen can show and cancel them.
+- **Frontend:** the participant queue screen shows the round number, one song per
+  participant, the participant's own songs (current + upcoming, each cancellable),
+  and their position within the current round. The host dashboard shows a round
+  indicator.
+- **Realtime:** `QueueUpdated` snapshots already fire on every mutation; the
+  round advance is visible through the snapshot's `round_number`. A dedicated
+  `RoundStarted` event is **not** emitted: the mutation that empties a round
+  already broadcasts `QueueUpdated` (which carries the new round's snapshot).
+
+## Acceptance criteria
+
+1. With p1 ×3, p2 ×2, p3 ×5 queued songs, the play order is p1,p2,p3 →
+   p1,p2,p3 → p1,p3 → p3 → p3.
+2. A participant's 2nd song is not visible in the queue until every
+   participant's 1st song is done.
+3. Round order is stable: within every round, participants sing in the order they
+   first submitted/joined; late joiners are appended to the current round.
+4. A participant whose songs run out drops out automatically; the queue continues.
+5. The per-participant cap (default 5) is enforced; exceeding it rejects with a
+   clear message.
+6. No `ROUND_COMPLETE` state: rounds advance automatically with no enrollment
+   prompt.
+7. Positions are computed within the current round; future-round songs have no
+   position.
+
+---
+
 # M11 — Playback State Machine
 
 ## Goal
@@ -827,7 +898,10 @@ Host can interrupt transitions.
 
 ## Acceptance criteria
 
-The backend can determine exactly which singer/song should be active.
+The backend can determine exactly which singer/song should be active: the
+first non-terminal entry of the current round (stable participant order, M10.1).
+When the current round's queue is exhausted, playback advances into the next
+round's first entry automatically (M10.1).
 
 ---
 
@@ -989,61 +1063,48 @@ The next participant receives a clear notification.
 
 ---
 
-# M16 — Round System
+# M16 — Round Lifecycle Cleanup + Summaries (revised at M10.1)
 
 ## Goal
 
-Support repeated rounds during one Friday karaoke session.
+(Revised at M10.1.) Rounds now **auto-advance** with no enrollment (M10.1,
+decision D44): round N holds one song per participant, and when the queue is
+exhausted the session moves to everyone's next song automatically. This
+milestone covers the remaining round/participant lifecycle concerns that M10.1
+does not.
 
-Example:
+## Tasks
 
-```text
-Round 1
---------
-Alice
-Bob
-Charlie
-David
-
-queue becomes empty
-
-Round complete
-        |
-        v
-"Join next round?"
-
-YES / NO
-
-No response => YES
-```
-
-## Participant behavior
-
-At round completion:
-
-- Default answer is YES.
-- Participant can explicitly choose NO.
-- Participants who choose YES enter the next round.
-- Participants who choose NO are excluded from the next round.
-- Participants who have left/disconnected should not silently remain forever.
+- **Absent-participant cleanup:** participants who have disconnected/left should
+  not silently keep future-round slots forever. Define a server-side cleanup
+  window and behavior (entries removed or marked) so an absent singer cannot
+  block the queue indefinitely.
+- **Round/session summaries:** surface to the host how many rounds have been
+  played, how many songs each participant had/remaining, and the active round,
+  for the projector dashboard and end-of-night wrap-up.
+- **End-of-night flow:** when no rounds remain and the queue is empty, the
+  session can end cleanly (host action) without leftover state.
 
 ## Important
 
-Do not create a new session for every round.
-
-A session contains multiple rounds.
+Do not create a new session for every round. A session contains multiple rounds:
 
 ```text
 Session
-  ├── Round 1
-  ├── Round 2
-  ├── Round 3
+  ├── Round 1   (everyone's 1st song)
+  ├── Round 2   (everyone's 2nd song)
+  ├── Round 3   (everyone's 3rd song)
   └── ...
 ```
 
+Rounds advance automatically; there is no enrollment prompt.
+
 ## Acceptance criteria
 
-A Friday karaoke session can run multiple rounds without recreating the QR code.
+- A participant who has left no longer occupies a future-round slot after the
+  configured cleanup window.
+- The host dashboard shows the active round and a per-participant song count.
+- A Friday karaoke session can run multiple rounds without recreating the QR code.
 
 ---
 
@@ -1085,12 +1146,12 @@ Test:
 
 - queue ordering
 - state transitions
-- round transitions
+- round transitions (round-robin ordering, round auto-advance — M10.1)
 - skip
 - finish
 - remove
 - cancel
-- next-round enrollment
+- per-participant song cap (M10.1)
 
 ## Integration tests
 
@@ -1462,6 +1523,8 @@ M9
 M9.1
  ↓
 M10
+ ↓
+M10.1
  ↓
 M11
  ↓

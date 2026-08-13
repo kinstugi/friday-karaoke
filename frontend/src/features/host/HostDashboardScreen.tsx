@@ -297,7 +297,9 @@ export default function HostDashboardScreen() {
           </section>
 
           <section className="host-queue">
-            <h2>Queue</h2>
+            <h2>
+              Queue{snapshot ? ` · Round ${snapshot.round_number}` : ''}
+            </h2>
             {snapshot === null ? (
               <p className="muted">Loading queue…</p>
             ) : snapshot.queue.length === 0 ? (

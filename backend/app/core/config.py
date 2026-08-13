@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     #: Threshold (seconds) above which a video preview carries a long-video
     #: warning (M6, decision D34). Warnings never reject.
     youtube_long_video_seconds: int = 600
+    #: Maximum songs a participant may queue total, across all rounds (M10.1,
+    #: decision D45). Submissions beyond this are rejected.
+    queue_max_songs_per_participant: int = 5
 
 
 @lru_cache

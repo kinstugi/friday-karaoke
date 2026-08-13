@@ -57,9 +57,8 @@ def test_created_can_start_and_end() -> None:
     assert SessionStatus.CREATED.can_transition_to(SessionStatus.ENDED)
 
 
-def test_created_cannot_skip_to_paused_or_round_complete() -> None:
+def test_created_cannot_skip_to_paused() -> None:
     assert not SessionStatus.CREATED.can_transition_to(SessionStatus.PAUSED)
-    assert not SessionStatus.CREATED.can_transition_to(SessionStatus.ROUND_COMPLETE)
 
 
 def test_ended_is_terminal() -> None:
@@ -74,15 +73,14 @@ def test_end_allowed_from_every_non_terminal_state() -> None:
             assert status.can_transition_to(SessionStatus.ENDED), status
 
 
-def test_start_only_allowed_from_created_and_active_neighbors() -> None:
+def test_start_only_allowed_from_created_and_paused() -> None:
     # In M4 only CREATED -> ACTIVE is reachable (start), but the documented
-    # lifecycle also allows PAUSED -> ACTIVE (resume, M14) and
-    # ROUND_COMPLETE -> ACTIVE (start next round, M16).
+    # lifecycle also allows PAUSED -> ACTIVE (resume, M14). ROUND_COMPLETE was
+    # removed at M10.1 (rounds auto-advance; no "start next round").
     expected = {
         SessionStatus.CREATED: True,
         SessionStatus.ACTIVE: False,
         SessionStatus.PAUSED: True,
-        SessionStatus.ROUND_COMPLETE: True,
         SessionStatus.ENDED: False,
     }
     for status, allowed in expected.items():
