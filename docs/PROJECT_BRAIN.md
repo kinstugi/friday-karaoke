@@ -82,7 +82,7 @@ Scan QR
 - Backend/database is the **single source of truth** for queue order, current singer,
   round state, playback state, permissions, participant identity, and session state.
 - Frontend is a React + TypeScript SPA (Vite). It never owns authoritative state.
-- Realtime delivery via **FastAPI WebSockets** (planned M10). WebSockets are a delivery
+- Realtime delivery via **FastAPI WebSockets** (implemented M10). WebSockets are a delivery
   mechanism, **not** the source of truth; clients resync from the backend after reconnect.
 - The **host's browser is the playback device** (YouTube embedded player).
   Participants' phones never play the song.
@@ -165,11 +165,25 @@ limit, sessions not tied to a browser) are in `docs/PRODUCT_SPEC.md` §8–§9 a
 
 ## 8. Current milestone
 
-**M10 — Realtime updates** (next; backend + frontend). M9.1 is complete; see
+**M11 — Playback state machine** (next; backend). M10 is complete; see
 `docs/DEV_BRAIN.md` for live status.
 
 ## 9. Completed milestones
 
+- **M10 — Realtime updates** (complete, backend + frontend): FastAPI WebSocket
+  channel at `GET /api/v1/sessions/{id}/ws` with the bearer token in a `token`
+  query param (browser WS cannot set headers); tokens must belong to the
+  session (participant bound to it / host owning it) or the upgrade is rejected
+  (D42). An in-process `RealtimeHub` (`app/realtime/hub.py`, no Redis per D9)
+  fans out typed events per session; REST routes broadcast after domain changes
+  commit: `QueueUpdated` (full authoritative `QueueSnapshotResponse`, on
+  submit/cancel/remove/edit), `ParticipantJoined` (join), `SessionUpdated`
+  (start/end). Event models in `app/schemas/realtime.py` (typed, never
+  free-form). The participant queue screen and host dashboard subscribe via
+  `src/ws/client.ts` + `src/ws/useRealtime.ts` and fall back to 5 s snapshot
+  polling while the socket is down (B13/D42); reconnecting clients re-fetch the
+  REST snapshot (D5). Vite dev proxy forwards WS (`ws: true`). 12 new realtime
+  tests; suite now 175 passed; live smoke verified against PostgreSQL.
 - **M9.1 — Frontend UI polish** (complete, frontend + config): codified the
   project's frontend UI quality bar as the `frontend-ui` skill
   (`.opencode/skills/frontend-ui/SKILL.md`), wired into the coder and reviewer
@@ -258,8 +272,11 @@ limit, sessions not tied to a browser) are in `docs/PRODUCT_SPEC.md` §8–§9 a
   (enrollment, next round) lands in M16.
 - The host dashboard's skip/finish/pause/resume buttons are disabled until the
   M11 playback state machine and its endpoints exist (D40).
-- Participant and host UIs poll the snapshot (M8/M9, D38); realtime WebSocket
-  delivery lands in M10.
+- Realtime (M10) delivers only the events whose producers exist: `QueueUpdated`
+  (submit/cancel/remove/edit), `ParticipantJoined` (join), and `SessionUpdated`
+  (start/end). Singer/round/pause events arrive with their milestones
+  (M11/M13/M14/M16). The `RealtimeHub` is in-process/per-worker (D42): a
+  multi-worker backend would need a shared hub (Redis) first (D9).
 - Only the Host/HostAuthToken/Session/Participant/YouTubeVideo/Round/QueueEntry
   tables exist (migration `0005`). PAUSED and ROUND_COMPLETE session states are
   defined but not reachable yet (M14/M16).
@@ -320,6 +337,11 @@ See `docs/DECISIONS.md` for the full, maintained list. Highlights:
 - Frontend UI (M9.1): the `frontend-ui` skill codifies the design system
   (tokens, two-surface layout, components, accessibility) and is the quality bar
   for every frontend milestone; all screens now use the token-driven styles.
+- Realtime (M10): one authenticated WebSocket channel per session
+  (`/api/v1/sessions/{id}/ws`, token in the query param) with an in-process
+  per-worker `RealtimeHub` (no Redis, D9); typed per-event payloads in
+  `app/schemas/realtime.py`; only events whose producers exist are emitted;
+  clients re-fetch on reconnect (D5, D42).
 - No user-visible feature in M0 beyond a health check.
 
 ## 12. Commands for running / testing

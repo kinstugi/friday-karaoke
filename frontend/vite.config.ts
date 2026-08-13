@@ -6,9 +6,12 @@ export default defineConfig({
   plugins: [react()],
   server: {
     // The SPA talks to the backend through same-origin /api paths; the dev
-    // server proxies them to the FastAPI app (M8).
+    // server proxies them (HTTP and WebSocket) to the FastAPI app (M8/M10).
     proxy: {
-      '/api': 'http://localhost:8000',
+      '/api': {
+        target: 'http://localhost:8000',
+        ws: true,
+      },
     },
   },
 })

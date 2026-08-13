@@ -20,12 +20,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_session
 from app.models.participant import Participant
 from app.models.session import Session
+from app.realtime.hub import realtime_hub
 from app.schemas.participant import (
     JoinSessionResponse,
     ParticipantCreateRequest,
     ParticipantJoinResponse,
     ParticipantResponse,
 )
+from app.schemas.realtime import ParticipantJoinedEvent
 from app.services.participant import (
     InvalidNicknameError,
     NicknameTakenError,
@@ -107,6 +109,10 @@ async def register_participant(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"nickname '{exc.args[0]}' is already taken",
         ) from exc
+    await realtime_hub.broadcast(
+        karaoke.id,
+        ParticipantJoinedEvent(session_id=karaoke.id, nickname=participant.nickname),
+    )
     return ParticipantJoinResponse(
         token=raw_token,
         session=_session_to_join_response(karaoke),

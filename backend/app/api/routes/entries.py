@@ -32,12 +32,14 @@ from app.models.host import Host
 from app.models.participant import Participant
 from app.models.queue_entry import QueueEntry
 from app.models.session import Session
+from app.realtime.hub import realtime_hub
 from app.schemas.queue import (
     QueueEntryResponse,
     QueueSnapshotResponse,
     SongSubmitResponse,
     SongUrlRequest,
 )
+from app.schemas.realtime import QueueUpdatedEvent
 from app.schemas.youtube import (
     SongPreviewRequest,
     SongPreviewResponse,
@@ -146,6 +148,22 @@ async def _position_of(
     return None
 
 
+async def _build_snapshot(
+    session: AsyncSession, session_id: uuid.UUID
+) -> QueueSnapshotResponse:
+    """Return the authoritative queue snapshot (shared by REST + realtime)."""
+    karaoke = await session_service.get_by_id(session, session_id)
+    active = await queue_service.get_active_entries(session, session_id)
+    return QueueSnapshotResponse(
+        session_id=karaoke.id,
+        status=karaoke.status,
+        queue=[
+            _entry_to_response(entry, index)
+            for index, entry in enumerate(active, start=1)
+        ],
+    )
+
+
 # --- Session-scoped: preview / submit / snapshot -------------------------------
 
 
@@ -191,11 +209,18 @@ async def submit_song(
             status_code=status.HTTP_409_CONFLICT, detail=str(exc)
         ) from exc
     position = await _position_of(session, session_id, entry.id)
-    return SongSubmitResponse(
+    response = SongSubmitResponse(
         entry=_entry_to_response(entry, position),
         duplicate=duplicate,
         notice=DUPLICATE_NOTICE if duplicate else None,
     )
+    await realtime_hub.broadcast(
+        session_id,
+        QueueUpdatedEvent(
+            session_id=session_id, snapshot=await _build_snapshot(session, session_id)
+        ),
+    )
+    return response
 
 
 @router.get("", response_model=QueueSnapshotResponse)
@@ -205,18 +230,9 @@ async def queue_snapshot(
 ) -> QueueSnapshotResponse:
     """Public queue snapshot (sanitized; no host identity or participant tokens)."""
     try:
-        karaoke = await session_service.get_by_id(session, session_id)
+        return await _build_snapshot(session, session_id)
     except SessionNotFoundError as exc:
         raise _not_found() from exc
-    active = await queue_service.get_active_entries(session, session_id)
-    return QueueSnapshotResponse(
-        session_id=karaoke.id,
-        status=karaoke.status,
-        queue=[
-            _entry_to_response(entry, index)
-            for index, entry in enumerate(active, start=1)
-        ],
-    )
 
 
 # --- Entry-scoped: cancel/remove and host edit --------------------------------
@@ -231,15 +247,22 @@ async def delete_entry(
     """Cancel own WAITING entry (participant, B3) or remove any entry (host, B4)."""
     try:
         if isinstance(actor, Participant):
-            await queue_service.cancel(session, actor, entry_id)
+            entry = await queue_service.cancel(session, actor, entry_id)
         else:
-            await queue_service.remove(session, actor.id, entry_id)
+            entry = await queue_service.remove(session, actor.id, entry_id)
     except EntryNotFoundError as exc:
         raise _entry_not_found() from exc
     except EntryNotCancellableError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail=str(exc)
         ) from exc
+    await realtime_hub.broadcast(
+        entry.session_id,
+        QueueUpdatedEvent(
+            session_id=entry.session_id,
+            snapshot=await _build_snapshot(session, entry.session_id),
+        ),
+    )
 
 
 @entry_router.patch("/{entry_id}/video", response_model=QueueEntryResponse)
@@ -256,4 +279,12 @@ async def edit_entry_video(
     except EntryNotFoundError as exc:
         raise _entry_not_found() from exc
     position = await _position_of(session, entry.session_id, entry.id)
-    return _entry_to_response(entry, position)
+    response = _entry_to_response(entry, position)
+    await realtime_hub.broadcast(
+        entry.session_id,
+        QueueUpdatedEvent(
+            session_id=entry.session_id,
+            snapshot=await _build_snapshot(session, entry.session_id),
+        ),
+    )
+    return response

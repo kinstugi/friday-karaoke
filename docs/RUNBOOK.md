@@ -181,6 +181,47 @@ npm run typecheck && npm run lint && npm run build
 # http://localhost:5173/join/<code> -> nickname -> submit -> queue.
 ```
 
+## Realtime verification (M10)
+
+The participant queue screen and host dashboard subscribe to
+`/api/v1/sessions/{id}/ws` (bearer token in a `token` query parameter) and fall
+back to polling while disconnected. Quick check:
+
+```bash
+# With the backend running (uv run uvicorn app.main:app), from backend/:
+uv run python - <<'EOF'
+import json, uuid, httpx
+from websockets.sync.client import connect
+BASE = "http://localhost:8000"; WS = "ws://localhost:8000"
+email = f"rt-{uuid.uuid4().hex[:6]}@school.edu"
+h = httpx.Client()
+h.post(f"{BASE}/api/v1/auth/host/register", json={"email": email, "password": "correct-horse-battery"})
+host = h.post(f"{BASE}/api/v1/auth/host/login", json={"email": email, "password": "correct-horse-battery"}).json()["token"]
+hh = {"Authorization": f"Bearer {host}"}
+session = h.post(f"{BASE}/api/v1/sessions", json={}, headers=hh).json()
+sid = session["id"]
+alice = h.post(f"{BASE}/api/v1/join/{session['join_code']}/participants", json={"nickname": "Alice"}).json()["token"]
+with connect(f"{WS}/api/v1/sessions/{sid}/ws?token={alice}") as ws:  # participant stream
+    h.post(f"{BASE}/api/v1/join/{session['join_code']}/participants", json={"nickname": "Bob"})
+    print("event:", json.loads(ws.recv(timeout=5))["type"])            # ParticipantJoined
+with connect(f"{WS}/api/v1/sessions/{sid}/ws?token={host}") as ws:      # host stream
+    h.post(f"{BASE}/api/v1/sessions/{sid}/start", headers=hh)
+    event = json.loads(ws.recv(timeout=5))
+    print("event:", event["type"], event["status"])                        # SessionUpdated ACTIVE
+    h.post(f"{BASE}/api/v1/sessions/{sid}/end", headers=hh)
+    event = json.loads(ws.recv(timeout=5))
+    print("event:", event["type"], event["status"])                        # SessionUpdated ENDED
+EOF
+```
+
+- Tokenless / cross-session / non-owner connections are rejected (close 1008
+  in-process; HTTP 403 on the upgrade over a real socket).
+- `QueueUpdated` events (submit/cancel/remove/edit) carry the full authoritative
+  snapshot; they are covered by `backend/tests/test_realtime.py` (12 tests).
+- WebSockets are delivery only (D5): after a reconnect the client re-fetches
+  authoritative state, and both screens fall back to 5 s polling while the
+  socket is down (B13).
+
 ## Branch / commit workflow
 
 - Development happens on `dev`. Never commit directly to `master`.

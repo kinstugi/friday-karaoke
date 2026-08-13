@@ -344,25 +344,34 @@ POST /sessions/{id}/entries
 | POST   | /rounds/{roundId}/enroll      | participant | Yes/No for next round   |
 | POST   | /sessions/{id}/rounds/start   | host | Start next round               |
 
-## 8. Realtime (WebSocket, M10)
+## 8. Realtime (WebSocket, M10) — IMPLEMENTED (QueueUpdated / ParticipantJoined / SessionUpdated)
 
-- Host stream: `/ws/sessions/{id}?token=<host>`
-- Participant stream: `/ws/sessions/{id}?token=<participant>`
+- Session stream: `ws(s)://<host>/api/v1/sessions/{id}/ws?token=<bearer>`
+  (the browser WebSocket API cannot set request headers, so the bearer token
+  rides in the query parameter; decision D42).
+
+The `token` must belong to the session — a participant token must be bound to
+it, a host token must own it; anything else is rejected before the connection
+is accepted (close code 1008, HTTP 403 on the upgrade, no existence leak).
 
 Events are typed domain events (delivery only, never authoritative):
 
 ```text
-QueueUpdated
-SingerStarted
-SingerFinished
-SingerSkipped
-ParticipantJoined
-ParticipantRemoved
-RoundStarted
-RoundCompleted
-SessionPaused
-SessionResumed
+QueueUpdated       payload: { type, session_id, snapshot: QueueSnapshotResponse }
+ParticipantJoined  payload: { type, session_id, nickname }
+SessionUpdated     payload: { type, session_id, status }
 ```
+
+`QueueUpdated` carries the full authoritative queue snapshot (the same shape
+the REST `GET /sessions/{id}/entries` returns) so every subscriber renders the
+same state. It is emitted after submit, participant cancel, host remove, and
+host edit. `ParticipantJoined` fires when someone registers in the session;
+`SessionUpdated` fires when the host starts/ends the session.
+
+The other events in the original target list (`SingerStarted`, `SingerFinished`,
+`SingerSkipped`, `ParticipantRemoved`, `RoundStarted`, `RoundCompleted`,
+`SessionPaused`, `SessionResumed`) are not emitted until their milestones
+create the producing code paths (M11/M13/M14/M16).
 
 Rules:
 

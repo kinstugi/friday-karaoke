@@ -573,11 +573,47 @@ These freeze MVP product behavior. They were captured in `docs/PRODUCT_SPEC.md`.
 
 ---
 
+## M10 realtime decisions
+
+## D42. WebSocket channel: in-process hub + per-session broadcast
+
+- **Status:** Accepted
+- **Decision:** One WebSocket endpoint per session —
+  `GET /api/v1/sessions/{id}/ws` — with a bearer token passed as the `token`
+  query parameter (the browser WebSocket API cannot set request headers). The
+  token must belong to the session: a participant token must be bound to it, a
+  host token must own it; anything else is rejected before `accept()` (close
+  code 1008 / HTTP 403 on the upgrade, no session-existence leak, D29). A
+  single in-process `RealtimeHub` (`app/realtime/hub.py`) fans out typed
+  events to every subscriber of a session; REST routes broadcast after a domain
+  change commits. Events for M10 are `QueueUpdated` (full authoritative queue
+  snapshot, emitted on submit/cancel/remove/edit), `ParticipantJoined`
+  (join), and `SessionUpdated` (start/end). Singer/round/pause events are NOT
+  emitted until their milestones create the producing code paths
+  (M11/M13/M14/M16). The hub is in-process and per-worker (no Redis, D9); a
+  shared hub is deferred until the backend runs multiple workers.
+- **Rationale:** The plan's realtime acceptance criterion is that queue changes
+  reach participant phones almost immediately. A per-session fan-out over one
+  authenticated socket is the smallest design that does that, matches
+  API_CONTRACT §8 (token query param; typed payloads), and keeps the frontend a
+  thin renderer (D2). Carrying the full snapshot in `QueueUpdated` means every
+  subscriber renders exactly the same authoritative state the REST snapshot
+  returns. Reconnecting clients must re-fetch authoritative state (D5), which
+  the frontend implements by resuming snapshot polling while the socket is
+  down (B13).
+- **Rejected:** Unauthenticated sockets (events are the same data as the public
+  snapshot, but the contract documents a token and auth keeps a future
+  host-only stream possible); Redis pub/sub (D9 — one worker today); publishing
+  from services (keeps services pure; routes own the HTTP/socket boundary).
+
+---
+
 ## Open questions (tracked)
 
 - ~~Authentication mechanism for hosts (email/password vs. school SSO)~~ — **M3
   resolved: email/password + opaque bearer tokens (D25).**
 - ~~YouTube metadata source (oEmbed vs. Data API key)~~ — **M6 resolved:
   YouTube Data API v3 (D33).**
-- Exact realtime payload schemas — M10.
+- ~~Exact realtime payload schemas~~ — **M10 resolved: typed per-event models
+  (`app/schemas/realtime.py`), discriminated by `type` (D42).**
 - Web Push service choice — M15.

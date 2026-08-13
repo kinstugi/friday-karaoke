@@ -129,8 +129,12 @@ class QueueService:
         session: AsyncSession,
         participant: Participant,
         entry_id: uuid.UUID,
-    ) -> None:
-        """Cancel the participant's own WAITING entry (B3)."""
+    ) -> QueueEntry:
+        """Cancel the participant's own WAITING entry (B3).
+
+        Returns the updated entry (the caller needs its ``session_id`` to
+        publish the realtime ``QueueUpdated`` event).
+        """
         entry = await self.get_entry(session, entry_id)
         if (
             entry.session_id != participant.session_id
@@ -144,11 +148,16 @@ class QueueService:
         entry.status = QueueEntryStatus.CANCELLED
         entry.ended_at = datetime.now(timezone.utc)
         await session.commit()
+        return entry
 
     async def remove(
         self, session: AsyncSession, host_id: uuid.UUID, entry_id: uuid.UUID
-    ) -> None:
-        """Remove any entry in one of the host's sessions (B4)."""
+    ) -> QueueEntry:
+        """Remove any entry in one of the host's sessions (B4).
+
+        Returns the updated entry (the caller needs its ``session_id`` to
+        publish the realtime ``QueueUpdated`` event).
+        """
         entry = await self.get_entry(session, entry_id)
         try:
             await session_service.get_for_host(session, host_id, entry.session_id)
@@ -157,6 +166,7 @@ class QueueService:
         entry.status = QueueEntryStatus.REMOVED
         entry.ended_at = datetime.now(timezone.utc)
         await session.commit()
+        return entry
 
     async def edit_video(
         self,

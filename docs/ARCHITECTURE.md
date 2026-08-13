@@ -58,13 +58,14 @@ placeholders; `services/` gained its first real use-case at M3 — host auth;
 ```text
 backend/
     app/
-        api/          # HTTP + WebSocket endpoints/routers (health M2, auth M3, sessions M4, join M5, entries M6)
+        api/          # HTTP + WebSocket endpoints/routers (health M2, auth M3, sessions M4, join M5, entries M6, realtime M10)
         core/         # config (Pydantic Settings), structured logging, database, security
         domain/       # domain models, enums, business rules, state machines (SessionStatus M4)
         services/     # use-cases (host auth M3, sessions M4, join M5, youtube M6, queue M7)
         repositories/ # persistence access (SQLAlchemy) (deferred until shared)
         models/       # SQLAlchemy ORM models (Host, Session, Participant, YouTubeVideo, Round, QueueEntry)
-        schemas/      # Pydantic API schemas (health M2; auth M3; sessions M4; join M5; youtube M6; queue M7)
+        schemas/      # Pydantic API schemas (health M2; auth M3; sessions M4; join M5; youtube M6; queue M7; realtime M10)
+        realtime/     # in-process WebSocket delivery hub (M10, decision D42)
         main.py       # FastAPI app factory / entry point
     tests/            # pytest suite (self-contained: in-memory SQLite)
     alembic/          # migrations (async env; 0001..0004)
@@ -103,10 +104,20 @@ Implementation status at M6:
   under `/api/v1/sessions` (create/get/**list (M9)**/start/end + SVG QR, M4/M5); public join
   under `/api/v1/join` (M5); song endpoints under `/api/v1/sessions/{id}/entries`
   (preview M6, submit + snapshot M7) and `/api/v1/entries` (cancel/remove, host
-  edit, M7). `get_current_host`, `get_current_participant`, and
+  edit, M7). Realtime under `/api/v1/sessions/{id}/ws` (M10): a bearer token
+  in the `token` query parameter must belong to the session (participant bound
+  to it / host owning it); typed events fan out via the in-process
+  `RealtimeHub`. `get_current_host`, `get_current_participant`, and
   `get_host_or_participant` dependencies enforce bearer tokens; ownership/session
   binding is enforced in services/endpoints (cross-owner → 404, D29). Business
   endpoints use the `/api/v1` base path (D26); health stays at the root.
+- **Realtime (M10):** `app/realtime/hub.py` is an in-process, per-worker
+  broadcast hub (no Redis, D9/D42) keyed by session id. REST routes broadcast
+  after a domain change commits: `QueueUpdated` (full authoritative snapshot)
+  on submit/cancel/remove/edit, `ParticipantJoined` on join, `SessionUpdated`
+  on start/end. Event models live in `app/schemas/realtime.py` (typed, never
+  free-form). Clients re-fetch the REST snapshot on reconnect (D5); the
+  frontend falls back to polling while the socket is down (B13).
 - **Migrations:** Alembic async env wired to application settings; revisions
   `0001_initial` … `0005_queue`. `alembic check` reports no drift.
 
@@ -158,9 +169,11 @@ Frontend rules (all in effect at M8/M9/M9.1):
   is designed for a projector/TV (large text, high contrast, minimal scrolling
   for current/next) (M9).
 - Standard PWA (manifest + service worker) planned for M19.
-- Realtime is a delivery mechanism only (D5); until the WebSocket channel lands
-  in M10 the queue screen and host dashboard poll the authoritative snapshot
-  every 5 s (D38).
+- Realtime is a delivery mechanism only (D5): since M10, the queue screen and
+  host dashboard subscribe to the session's WebSocket channel
+  (`src/ws/client.ts` + `src/ws/useRealtime.ts`) and only fall back to polling
+  the authoritative snapshot every 5 s while the socket is down (B13/D42).
+  Reconnecting clients re-fetch from the REST API (D5).
 
 ## 5. Data flow (target state)
 
@@ -223,7 +236,12 @@ get correct state from the API.
 - **M9.1** — frontend UI polish (complete, frontend): `frontend-ui` skill
   (design system, two-surface rules, components, accessibility) + all screens
   refactored onto token-driven styles.
-- **M10–M16** — realtime + playback + rounds + notifications.
+- **M10** — realtime updates (complete): FastAPI WebSocket channel
+  (`/api/v1/sessions/{id}/ws`, token query param, D42), in-process
+  `RealtimeHub` fan-out, typed events (`QueueUpdated` full snapshot /
+  `ParticipantJoined` / `SessionUpdated`), and frontend subscription with
+  fallback polling while disconnected (B13).
+- **M11–M16** — playback + rounds + notifications.
 - **M17–M19** — security, testing, PWA/mobile UX.
 - **M20–M22** — deployment, pilot, fixes.
 

@@ -25,6 +25,8 @@ from app.core.config import get_settings
 from app.core.database import get_session
 from app.models.host import Host
 from app.models.session import Session
+from app.realtime.hub import realtime_hub
+from app.schemas.realtime import SessionUpdatedEvent
 from app.schemas.session import SessionCreateRequest, SessionResponse
 from app.services.session import (
     InvalidSessionTransitionError,
@@ -114,6 +116,10 @@ async def start_session(
         raise _not_found() from exc
     except InvalidSessionTransitionError as exc:
         raise _conflict(str(exc)) from exc
+    await realtime_hub.broadcast(
+        karaoke.id,
+        SessionUpdatedEvent(session_id=karaoke.id, status=karaoke.status),
+    )
     return _session_to_response(karaoke)
 
 
@@ -130,6 +136,10 @@ async def end_session(
         raise _not_found() from exc
     except InvalidSessionTransitionError as exc:
         raise _conflict(str(exc)) from exc
+    await realtime_hub.broadcast(
+        karaoke.id,
+        SessionUpdatedEvent(session_id=karaoke.id, status=karaoke.status),
+    )
     return _session_to_response(karaoke)
 
 

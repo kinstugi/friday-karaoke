@@ -1,7 +1,8 @@
-// Participant queue screen (PRODUCT_SPEC §6.6/§7.3): polls the public snapshot
-// and renders the session status, now/next cards, and the queue with the
-// participant's own entries highlighted. The backend is the source of truth —
-// this screen only renders what it returns.
+// Participant queue screen (PRODUCT_SPEC §6.6/§7.3): subscribes to the session's
+// realtime channel (M10) and renders the session status, now/next cards, and the
+// queue with the participant's own entries highlighted. The backend is the source
+// of truth — this screen only renders what it returns. While the WebSocket is
+// disconnected it falls back to polling the authoritative snapshot (D5/B13).
 import { useCallback, useEffect, useState } from 'react'
 import { Link, Navigate, useParams } from 'react-router-dom'
 
@@ -10,6 +11,7 @@ import type { QueueEntry, QueueSnapshot } from '../../api/types'
 import { formatDuration } from '../../lib/format'
 import { statusLabel } from '../../lib/session'
 import { loadIdentity } from '../../lib/token'
+import { useRealtime } from '../../ws/useRealtime'
 
 const POLL_INTERVAL_MS = 5000
 
@@ -21,6 +23,7 @@ export default function QueueScreen() {
 
   const [snapshot, setSnapshot] = useState<QueueSnapshot | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [connected, setConnected] = useState(false)
 
   const refresh = useCallback(async () => {
     if (!identity) return
@@ -32,11 +35,38 @@ export default function QueueScreen() {
     }
   }, [identity])
 
+  // Initial authoritative fetch; the live channel and the fallback poll below
+  // keep the screen fresh afterwards.
   useEffect(() => {
     void refresh()
+  }, [refresh])
+
+  // Fallback while realtime is unavailable (B13): poll the authoritative
+  // snapshot so the screen still updates if the WebSocket fails.
+  useEffect(() => {
+    if (connected) return
     const timer = setInterval(() => void refresh(), POLL_INTERVAL_MS)
     return () => clearInterval(timer)
-  }, [refresh])
+  }, [connected, refresh])
+
+  useRealtime(identity?.sessionId ?? '', identity?.token ?? '', {
+    onEvent: (event) => {
+      if (event.type === 'QueueUpdated') {
+        setSnapshot(event.snapshot)
+      } else if (event.type === 'SessionUpdated') {
+        // The snapshot carries the session status too; keep it in sync so the
+        // ended banner appears without a queue mutation (M10).
+        setSnapshot((prev) =>
+          prev ? { ...prev, status: event.status } : prev,
+        )
+      }
+    },
+    onStatusChange: (isConnected) => {
+      setConnected(isConnected)
+      // D5: re-fetch authoritative state when the socket (re)connects.
+      if (isConnected) void refresh()
+    },
+  })
 
   async function handleCancel(entry: QueueEntry) {
     if (!identity) return

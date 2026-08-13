@@ -5,8 +5,9 @@
 //
 // Playback-dependent actions (skip, finish, pause, resume) are rendered but
 // disabled: they require the M11 playback state machine and M14 endpoints,
-// which are not part of this milestone. The queue/session state is always
-// re-read from the backend; the screen only renders it (D2).
+// which are not part of this milestone. Queue/session state is always re-read
+// from the backend; the screen subscribes to the M10 realtime channel and only
+// falls back to polling while disconnected (D2, D5, B13).
 import { useCallback, useEffect, useState } from 'react'
 import { Link, Navigate, useParams } from 'react-router-dom'
 
@@ -16,6 +17,7 @@ import type { QueueEntry, QueueSnapshot, Session } from '../../api/types'
 import { formatDuration } from '../../lib/format'
 import { loadHostIdentity } from '../../lib/hostToken'
 import { statusLabel } from '../../lib/session'
+import { useRealtime } from '../../ws/useRealtime'
 
 const POLL_INTERVAL_MS = 5000
 
@@ -49,6 +51,7 @@ export default function HostDashboardScreen() {
   const [busy, setBusy] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editUrl, setEditUrl] = useState('')
+  const [connected, setConnected] = useState(false)
 
   const refreshQueue = useCallback(async () => {
     try {
@@ -69,19 +72,44 @@ export default function HostDashboardScreen() {
     }
   }, [identity, sessionId])
 
+  const refreshAll = useCallback(async () => {
+    // The session + queue endpoints are independent; a failure in one must
+    // not prevent the other from updating (B13 fallback while disconnected).
+    await Promise.allSettled([refreshSession(), refreshQueue()])
+  }, [refreshSession, refreshQueue])
+
+  // Initial authoritative fetch + the (immutable) QR code.
   useEffect(() => {
     if (!identity) return
-    void refreshSession()
+    void refreshAll()
     fetchSessionQr(identity.token, sessionId)
       .then(setQrSvg)
       .catch(() => setQrSvg(null))
-  }, [identity, sessionId, refreshSession])
+  }, [identity, sessionId, refreshAll])
 
+  // Fallback while realtime is unavailable (B13): poll the authoritative
+  // snapshot so the dashboard still updates if the WebSocket fails.
   useEffect(() => {
-    void refreshQueue()
-    const timer = setInterval(() => void refreshQueue(), POLL_INTERVAL_MS)
+    if (connected || !identity) return
+    const timer = setInterval(() => void refreshAll(), POLL_INTERVAL_MS)
     return () => clearInterval(timer)
-  }, [refreshQueue])
+  }, [connected, identity, refreshAll])
+
+  useRealtime(sessionId, identity?.token ?? '', {
+    onEvent: (event) => {
+      if (event.type === 'QueueUpdated') {
+        setSnapshot(event.snapshot)
+      } else if (event.type === 'SessionUpdated') {
+        // Keep the status badge / ended card in sync without a refetch.
+        setSession((prev) => (prev ? { ...prev, status: event.status } : prev))
+      }
+    },
+    onStatusChange: (isConnected) => {
+      setConnected(isConnected)
+      // D5: re-fetch authoritative state when the socket (re)connects.
+      if (isConnected) void refreshAll()
+    },
+  })
 
   if (!identity) {
     return <Navigate to="/host/login" replace />
