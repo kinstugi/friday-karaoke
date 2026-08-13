@@ -1,4 +1,4 @@
-"""Typed realtime event payloads (M10).
+"""Typed realtime event payloads (M10; singer events at M11).
 
 WebSockets are a delivery mechanism, not the source of truth (decision D5):
 the backend broadcasts these events to a session's subscribers after a domain
@@ -6,16 +6,20 @@ change, and a reconnecting client must re-fetch authoritative state from the
 REST API. Event payloads carry typed fields only — never free-form strings
 (API_CONTRACT §8).
 
-M10 emits the events that correspond to domain changes that already exist:
-- ``QueueUpdated``       queue mutated (submit, cancel, remove, edit) — the
-                         payload is the full authoritative queue snapshot
+M10/M11 emit the events that correspond to domain changes that already exist:
+- ``QueueUpdated``       queue mutated (submit, cancel, remove, edit, playback
+                         status changes) — the payload is the full authoritative
+                         queue snapshot
 - ``ParticipantJoined``  a new participant registered in the session
 - ``SessionUpdated``     session status changed (started/ended today; paused/
-                         resumed and rounds land in later milestones)
+                         resumed from M11)
+- ``SingerStarted``      the host started playing an entry (M11)
+- ``SingerFinished``     the host finished an entry (M11)
+- ``SingerSkipped``      the host skipped an entry (M11)
 
-The other events listed in API_CONTRACT §8 (SingerStarted, RoundCompleted,
-SessionPaused, …) are not emitted until their milestone creates the code paths
-that produce them (M11/M13/M14/M16).
+The other events listed in API_CONTRACT §8 (RoundStarted, SessionPaused, …) are
+not emitted: round advances are visible via ``round_number`` in the snapshot
+(M10.1), and automatic-transition states land with M13.
 """
 
 import uuid
@@ -48,12 +52,45 @@ class ParticipantJoinedEvent(BaseModel):
 
 
 class SessionUpdatedEvent(BaseModel):
-    """Broadcast when the session status changes (M4 start/end, later pause…)."""
+    """Broadcast when the session status changes (M4 start/end, M11 pause/resume)."""
 
     type: str = "SessionUpdated"
     session_id: uuid.UUID
     status: SessionStatus
 
 
+class SingerStartedEvent(BaseModel):
+    """Broadcast when the host starts an entry (promoted to ``SINGING``, M11)."""
+
+    type: str = "SingerStarted"
+    session_id: uuid.UUID
+    entry_id: uuid.UUID
+    participant_name: str
+    title: str
+
+
+class SingerFinishedEvent(BaseModel):
+    """Broadcast when the host finishes an entry (``COMPLETED``, M11)."""
+
+    type: str = "SingerFinished"
+    session_id: uuid.UUID
+    entry_id: uuid.UUID
+
+
+class SingerSkippedEvent(BaseModel):
+    """Broadcast when the host skips an entry (``SKIPPED``, M11)."""
+
+    type: str = "SingerSkipped"
+    session_id: uuid.UUID
+    entry_id: uuid.UUID
+
+
 #: The union of events the hub may deliver (typed, discriminated by ``type``).
-RealtimeEvent = Union[QueueUpdatedEvent, ParticipantJoinedEvent, SessionUpdatedEvent]
+RealtimeEvent = Union[
+    QueueUpdatedEvent,
+    ParticipantJoinedEvent,
+    SessionUpdatedEvent,
+    SingerStartedEvent,
+    SingerFinishedEvent,
+    SingerSkippedEvent,
+]

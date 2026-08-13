@@ -8,6 +8,15 @@ export type SessionStatus =
   | 'PAUSED'
   | 'ENDED'
 
+export type PlaybackState =
+  | 'IDLE'
+  | 'PREPARING'
+  | 'COUNTDOWN'
+  | 'PLAYING'
+  | 'COOLDOWN'
+  | 'FINISHED'
+  | 'SKIPPED'
+
 export type QueueEntryStatus =
   | 'WAITING'
   | 'NEXT'
@@ -66,6 +75,7 @@ export interface QueueSnapshot {
   session_id: string
   status: SessionStatus
   round_number: number
+  playback_state: PlaybackState
   queue: QueueEntry[]
 }
 

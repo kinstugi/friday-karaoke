@@ -171,11 +171,21 @@ song cap, sessions not tied to a browser) are in `docs/PRODUCT_SPEC.md` §8–§
 
 ## 8. Current milestone
 
-**M11 — Playback state machine** (next; backend). M10.1 is complete; see
+**M12 — YouTube host player** (next; frontend). M11 is complete; see
 `docs/DEV_BRAIN.md` for live status.
 
 ## 9. Completed milestones
 
+- **M11 — Playback state machine** (complete, backend + frontend): host-driven
+  playback endpoints under `/api/v1/sessions/{id}/play/…` (start/skip/finish/
+  pause/resume) that promote entries through `WAITING → SINGING → COMPLETED/
+  SKIPPED` (with `NEXT` on advance, D20), enable the dashboard's previously
+  disabled Skip/Finish/Pause/Resume buttons (D40), and make `PAUSED` reachable.
+  Playback state is **derived** (`PLAYING` iff an entry is `SINGING`, D46) and
+  surfaced in the snapshot; round boundaries auto-advance (M10.1). New realtime
+  events `SingerStarted`/`SingerFinished`/`SingerSkipped`. No schema migration.
+  15 new tests (suite 199); pyright 0; live smoke confirmed the full host-driven
+  flow.
 - **M10.1 — Queue rounds + auto-advance** (complete, backend + frontend): the
   queue is round-robin — one song per participant per round, in stable
   participant order (earliest first engagement), with the active round derived
@@ -285,11 +295,11 @@ song cap, sessions not tied to a browser) are in `docs/PRODUCT_SPEC.md` §8–§
 
 ## 10. Known limitations
 
-- No playback yet (M11/M12); queue entries stay WAITING — NEXT/SINGING statuses
-  exist but are not yet assigned. Rounds are round-robin since M10.1 (one song
-  per participant per round, auto-advance) but nothing assigns NEXT/SINGING yet.
-- The host dashboard's skip/finish/pause/resume buttons are disabled until the
-  M11 playback state machine and its endpoints exist (D40).
+- The host dashboard controls playback state (M11) but has **no YouTube player
+  yet** (M12): the host can start/skip/finish/pause/resume, but audio still comes
+  from wherever the host points it. Automatic (timer-driven) transitions
+  (PREPARING/COUNTDOWN/COOLDOWN) and the "you're next" notifications land in
+  M13/M15.
 - Realtime (M10) delivers only the events whose producers exist: `QueueUpdated`
   (submit/cancel/remove/edit), `ParticipantJoined` (join), and `SessionUpdated`
   (start/end). Round events arrive with M10.1; singer/pause events with their
@@ -366,6 +376,10 @@ See `docs/DECISIONS.md` for the full, maintained list. Highlights:
   round is derived and auto-advances, `ROUND_COMPLETE` and the next-round
   enrollment prompt are removed, and the per-participant cap is a configurable
   total of 5 (`KARAOKE_QUEUE_MAX_SONGS_PER_PARTICIPANT`) (D43–D45).
+- Playback (M11): the playback state is derived (`PLAYING` iff an entry is
+  `SINGING`, never stored) and host-driven via `/play/start|skip|finish|pause|
+  resume`; advancing crosses round boundaries automatically; the full
+  `PlaybackState` lifecycle (PREPARING/COUNTDOWN/COOLDOWN) waits for M13 (D46).
 - No user-visible feature in M0 beyond a health check.
 
 ## 12. Commands for running / testing

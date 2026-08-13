@@ -439,6 +439,10 @@ Every edge case lists the **behavior** an implementer must produce.
 
 ## 10. Playback and automation behavior
 
+> Implementation status: M11 delivers the host-driven playback controls
+> (start/skip/finish/pause/resume) and the derived playback state; the
+> timer-driven automatic transitions (PREPARING/COUNTDOWN/COOLDOWN) land in M13.
+
 The backend runs the playback state machine (`docs/DOMAIN_MODEL.md`,
 `PlaybackState`). Automation is the normal path; the host can interrupt any step.
 

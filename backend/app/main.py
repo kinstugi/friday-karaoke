@@ -10,7 +10,7 @@ milestones.
 from fastapi import FastAPI
 
 from app import __version__
-from app.api.routes import auth, entries, health, join, realtime, sessions
+from app.api.routes import auth, entries, health, join, playback, realtime, sessions
 from app.core.config import get_settings
 from app.core.logging import setup_logging
 
@@ -32,6 +32,7 @@ def create_app() -> FastAPI:
     application.include_router(entries.router)
     application.include_router(entries.entry_router)
     application.include_router(realtime.router)
+    application.include_router(playback.router)
     return application
 
 

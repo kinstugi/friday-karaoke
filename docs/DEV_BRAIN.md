@@ -7,106 +7,102 @@ of every milestone. The persistent context lives in `PROJECT_BRAIN.md`.
 
 ## Current milestone
 
-**M10.1 — Queue rounds + auto-advance** — COMPLETE (verified).
+**M11 — Playback state machine** — COMPLETE (verified).
 
 ## Current task
 
-None (milestone finished). Next milestone: **M11 — Playback state machine**
-(the backend determines exactly which singer/song is active: the first
-non-terminal entry of the current round; round boundaries are just another
-transition).
+None (milestone finished). Next milestone: **M12 — YouTube host player** (embed
+the YouTube player in the host dashboard; the host browser is the playback
+device). M13 (automatic transitions) and M15 (next-singer notifications) build
+on the M11 playback engine.
 
-## M10.1 scope (plan.md §M10.1)
+## M11 scope (plan.md §M11)
 
-Round-robin queue: one song per participant per round, stable participant order,
-rounds auto-advance, no next-round enrollment.
+- Formalize playback behavior: the backend determines exactly which singer/song
+  is active — the first non-terminal entry of the current round (M10.1) — and
+  round boundaries are just another transition.
+- Host-driven playback endpoints (start/skip/finish/pause/resume) that enable the
+  dashboard's previously-disabled Skip/Finish/Pause/Resume buttons (D40).
+- Entry status lifecycle: WAITING -> SINGING (start), -> NEXT (advance),
+  -> COMPLETED/SKIPPED (finish/skip, D20).
 
-## Verification results (M10.1 acceptance criteria, plan.md §M10.1)
+## Verification results (M11 acceptance criteria, plan.md §M11)
 
 | Acceptance criterion | Result |
 | -------------------- | ------ |
-| p1×3, p2×2, p3×5 → play order p1,p2,p3 / p1,p2,p3 / p1,p3 / p3 / p3 | Verified — `test_round_robin_order_and_auto_advance` (P1,P2,P3 → P1,P2 after round-1 exhaustion) plus the live smoke |
-| A participant's 2nd song is invisible until every participant's 1st song is done | Verified — `test_second_song_goes_to_a_future_round` (position null, not in snapshot) |
-| Stable round order; late joiners appended to the current round | Verified — `test_stable_order_repeats_across_rounds`, `test_late_joiner_appends_to_current_round` |
-| Participants whose songs run out drop out automatically | Verified — round-2 snapshot omits participants with no round-2 song |
-| Per-participant cap (5) enforced with a clear message | Verified — `test_submit_song_cap_conflicts` (409 "at most 5") + `test_submit_after_cancel_frees_a_song_cap_slot` |
-| No `ROUND_COMPLETE`; rounds advance automatically, no enrollment | Verified — `ROUND_COMPLETE` removed from `SessionStatus` + transitions; `test_new_submission_after_full_exhaustion_starts_next_round` |
-| Positions within the current round; future-round songs have no position | Verified — `test_my_entries_lists_current_and_upcoming_songs` (position null for upcoming) |
+| Backend can determine exactly which singer/song is active (first non-terminal of the current round) | Verified — `PlaybackService` operates on `queue_service.get_active_entries` (stable order, M10.1); `test_start_promotes_first_entry_and_derives_playing` |
+| Round boundaries are just another transition (auto-advance into the next round) | Verified — `test_round_advances_after_finishing_last_entry` (finish of round 1's last entry → round 2 active, next entry `NEXT`) |
+| Host can interrupt transitions (skip/finish/pause/resume) | Verified — skip→SKIPPED, finish→COMPLETED (D20); pause ACTIVE→PAUSED, resume PAUSED→ACTIVE; 409s for invalid actions |
 
 Additional verification:
 
-- Backend suite: **184 passed** (175 prior + 9 new queue/round tests), `pyright`
-  0 errors.
-- Frontend: `npm run typecheck`, `npm run lint`, `npm run build` all pass.
-- Live smoke against real PostgreSQL + real YouTube metadata: Alice song1 → pos 1,
-  Alice song2 → pos null, Bob song1 → pos 2; snapshot round 1 = [Alice, Bob];
-  my-songs = [(A, 1), (B, null)]; after the host removes the round-1 entries the
-  snapshot auto-advances to round 2 = [Alice(B)].
-- No schema migration: entries were already round-scoped; the change is pure
-  service/query logic (D43). The `Round` table gains lazily-created later rounds.
+- Backend suite: **199 passed** (184 prior + 15 new `tests/test_playback.py`),
+  `pyright` 0 errors.
+- Frontend: `npm run typecheck`, `npm run lint`, `npm run build` all pass; the
+  dashboard's Skip/Finish/Pause/Resume buttons are now live (disabled only when
+  the action is invalid, with an explanatory `title`), and the Playback card
+  shows the derived playback state.
+- Live smoke against real PostgreSQL + real YouTube metadata: start → PLAYING
+  [SINGING, WAITING]; realtime delivered `SingerStarted` + `QueueUpdated`;
+  finish → IDLE [NEXT]; skip → empty; pause before session start → 409; pause →
+  PAUSED; resume → ACTIVE.
+- No schema migration (playback state is derived, D46).
 
-## Files changed (M10.1)
+## Files changed (M11)
 
 ```text
-backend/app/core/config.py                    (+ KARAOKE_QUEUE_MAX_SONGS_PER_PARTICIPANT, default 5, D45)
-backend/.env.example                          (+ the new setting)
-backend/app/domain/session.py                 (ROUND_COMPLETE removed; CREATED->ACTIVE<->PAUSED->ENDED)
-backend/app/services/queue.py                 (round-robin engine: SongLimitError, round assignment,
-                                               derived active round, stable ordering, participant
-                                               entries, get_current_round_number)
-backend/app/schemas/queue.py                  (QueueSnapshotResponse + round_number)
-backend/app/api/routes/entries.py             (submit cap -> 409; _build_snapshot + round_number;
-                                               new GET /entries/mine "my songs" endpoint)
-backend/app/domain/queue_entry.py             (non_terminal docstring -> per-participant cap)
-backend/tests/test_queue.py                   (cap tests, round assignment/stable order/auto-advance/
-                                               late joiner/round_number/my-songs tests)
-backend/tests/test_sessions.py                (ROUND_COMPLETE assertions removed)
-frontend/src/api/types.ts                     (QueueSnapshot.round_number; ROUND_COMPLETE dropped)
-frontend/src/api/entries.ts                   (+ fetchMyEntries)
-frontend/src/lib/session.ts                   (statusLabel: ROUND_COMPLETE dropped)
-frontend/src/App.css                          (.badge-round replaces .badge-round_complete)
-frontend/src/features/queue/QueueScreen.tsx   (round badge, "Your songs" section with cancel,
-                                               one-entry-per-participant queue)
-frontend/src/features/host/HostDashboardScreen.tsx (round indicator in the queue heading)
-docs/PROJECT_BRAIN.md, docs/ARCHITECTURE.md, docs/DECISIONS.md, docs/DEV_BRAIN.md,
-docs/PRODUCT_SPEC.md, docs/DOMAIN_MODEL.md, docs/API_CONTRACT.md, docs/RUNBOOK.md, plan.md
+backend/app/domain/playback.py             (new — PlaybackState enum, full documented lifecycle)
+backend/app/services/playback.py           (new — PlaybackService: start/skip/finish, NEXT
+                                            promotion, ended-session guard)
+backend/app/services/session.py            (pause/resume session transitions ACTIVE<->PAUSED)
+backend/app/services/queue.py              (entry_response + snapshot helpers incl. derived
+                                            playback_state, shared by REST + realtime + playback)
+backend/app/schemas/queue.py               (QueueSnapshotResponse + playback_state)
+backend/app/schemas/realtime.py            (SingerStarted/SingerFinished/SingerSkipped events)
+backend/app/api/routes/playback.py         (new — /play/start|skip|finish|pause|resume, host-only)
+backend/app/api/routes/entries.py          (use queue_service.snapshot/entry_response)
+backend/app/main.py                        (include playback router)
+backend/tests/test_playback.py             (new — 15 tests)
+frontend/src/api/types.ts                  (PlaybackState type; QueueSnapshot.playback_state)
+frontend/src/ws/client.ts                  (Singer* event types + parse)
+frontend/src/api/host.ts                   (startPlayback/skipPlayback/finishPlayback/pausePlayback/resumePlayback)
+frontend/src/features/host/HostDashboardScreen.tsx (live playback action bar, Playback card,
+                                            playbackLabel)
+docs/PROJECT_BRAIN.md, docs/ARCHITECTURE.md, docs/DECISIONS.md (D46), docs/DEV_BRAIN.md,
+docs/API_CONTRACT.md, docs/RUNBOOK.md, docs/PRODUCT_SPEC.md
 ```
 
-## Implementation notes (M10.1)
+## Implementation notes (M11)
 
-- **Round assignment (B19/D43):** a new song goes to the current round (the
-  lowest-numbered round with a non-terminal entry) when the participant has no
-  non-terminal entry there; otherwise to one round above their highest. When the
-  queue is fully exhausted, a fresh submission starts the next numbered round —
-  except on a brand-new session, where the first songs belong to round 1 (this
-  was a bug caught by the tests: the first submission went to round 2).
-- **Derived active round:** never stored (D8-style). `_active_round` is a single
-  JOIN query; `get_active_entries` orders the current round by each participant's
-  earliest submission time (`MIN(created_at)` via an aggregated subquery join),
-  then `created_at`/`id`.
-- **Cap:** `KARAOKE_QUEUE_MAX_SONGS_PER_PARTICIPANT` (default 5) counts the
-  participant's non-terminal entries across all rounds. `ActiveEntryLimitError`
-  was renamed `SongLimitError` (the "active entries in this round" limit no
-  longer exists).
-- **No `RoundStarted` event:** round advances are visible through
-  `round_number` in the `QueueUpdated` snapshot (the mutation that empties a
-  round already broadcasts it).
-- **Frontend:** the participant queue screen shows a `Round N` badge and a
-  "Your songs" section (current-round entry with its position + upcoming songs,
-  each cancellable — cancel already worked for any own WAITING entry). The host
-  dashboard queue heading shows the active round.
-- **No scope creep:** no new dependencies, no schema migration, no enrollment
-  prompt, no `RoundStarted` event.
+- **Derived playback state (D46):** no stored column. `PLAYING` iff an entry is
+  `SINGING`, else `IDLE`. The `PlaybackState` enum carries the full documented
+  lifecycle; PREPARING/COUNTDOWN/COOLDOWN become reachable when M13 adds timers.
+- **Entry lifecycle:** `play/start` promotes the front of the active queue to
+  `SINGING`; `play/skip`/`play/finish` mark it `SKIPPED`/`COMPLETED` and promote
+  the new front to `NEXT`. Because the active round is derived (D43), advancing
+  past a round's last entry automatically makes the next round active — a round
+  boundary is just another transition.
+- **Realtime:** playback endpoints broadcast `SingerStarted`/`SingerFinished`/
+  `SingerSkipped` + `QueueUpdated`; pause/resume broadcast `SessionUpdated` (the
+  queue is unchanged). The snapshot is the single authoritative render source.
+- **Pause/resume:** session transitions `ACTIVE -> PAUSED` / `PAUSED -> ACTIVE`
+  in `SessionService` (previously defined but unreachable), exposed under
+  `/play/pause` and `/play/resume`. `PAUSED` is now reachable.
+- **Dashboard (D40 lifted):** the action bar wires Start-session, Start-next-song,
+  Skip, Finish, Pause, Resume, End-session. Skip/Finish are disabled only while
+  nothing is singing (with a `title`); Pause shows when ACTIVE, Resume when
+  PAUSED. The Playback card shows the derived state.
+- **No scope creep:** no host player (M12), no automation timers (M13), no
+  notifications (M15), no schema change, no new dependencies.
 
-## Tests added (M10.1)
+## Tests added (M11)
 
-- `test_queue.py` (9 new/rewritten): song cap (409 at 6th), cancel frees a cap
-  slot, second song → future round (position null, invisible in snapshot),
-  round-robin order + auto-advance via host removals, stable order repeats
-  across rounds, late joiner appended, empty-queue round_number default,
-  fresh-cycle round after full exhaustion, and the participant "my songs"
-  endpoint (auth, cross-session 404, current+upcoming listing).
-- `test_sessions.py`: `ROUND_COMPLETE` transition assertions removed.
+- `tests/test_playback.py` (15 tests): auth (401) + ownership (404) + ended
+  session (409); start with empty queue (409); start promotes first entry and
+  derives PLAYING; start twice (409); skip/finish mark SKIPPED/COMPLETED and
+  promote NEXT; skip/finish with nothing playing (409); round auto-advance
+  across finish; pause/resume transitions + invalid-state 409s; realtime
+  `SingerStarted`/`SingerSkipped` + `QueueUpdated` delivery.
 
 ## Current blockers
 
@@ -124,10 +120,9 @@ docs/PRODUCT_SPEC.md, docs/DOMAIN_MODEL.md, docs/API_CONTRACT.md, docs/RUNBOOK.m
 
 ## Next recommended task
 
-**M11 — Playback state machine** (backend): formalize the playback states
-(IDLE → PREPARING → COUNTDOWN → PLAYING → COOLDOWN → …) so the backend can
-determine exactly which singer/song is active — the first non-terminal entry of
-the current round (M10.1). Round boundaries are just another transition. Then
-the host dashboard's skip/finish/pause/resume actions (currently disabled, D40)
-and the `SingerStarted`/`SingerFinished`/`SingerSkipped` realtime events become
-implementable.
+**M12 — YouTube host player**: embed the YouTube IFrame player in the host
+dashboard (the host browser is the playback device, D4), drive it from the M11
+playback state (start/skip/finish), report player events (started/ended/errors)
+back to the backend, and handle browser-autoplay restrictions (host must
+interact before audio). M13 then wires the timer-driven automatic transitions
+(PREPARING/COUNTDOWN/COOLDOWN).

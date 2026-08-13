@@ -30,7 +30,6 @@ from app.core.database import get_session
 from app.domain.session import SessionStatus
 from app.models.host import Host
 from app.models.participant import Participant
-from app.models.queue_entry import QueueEntry
 from app.models.session import Session
 from app.realtime.hub import realtime_hub
 from app.schemas.queue import (
@@ -118,25 +117,6 @@ async def _fetch_video_data(youtube_url: str) -> YouTubeVideoData:
         ) from exc
 
 
-def _entry_to_response(
-    entry: QueueEntry, position: int | None
-) -> QueueEntryResponse:
-    """Explicit mapping from the ORM model to the API schema."""
-    return QueueEntryResponse(
-        id=entry.id,
-        participant_name=entry.participant.nickname,
-        status=entry.status,
-        video_id=entry.youtube_video.youtube_video_id,
-        youtube_url=entry.youtube_video.youtube_url,
-        title=entry.youtube_video.title,
-        channel=entry.youtube_video.channel,
-        duration_seconds=entry.youtube_video.duration_seconds,
-        thumbnail_url=entry.youtube_video.thumbnail_url,
-        position=position,
-        created_at=entry.created_at,
-    )
-
-
 async def _position_of(
     session: AsyncSession, session_id: uuid.UUID, entry_id: uuid.UUID
 ) -> int | None:
@@ -146,23 +126,6 @@ async def _position_of(
         if entry.id == entry_id:
             return index
     return None
-
-
-async def _build_snapshot(
-    session: AsyncSession, session_id: uuid.UUID
-) -> QueueSnapshotResponse:
-    """Return the authoritative queue snapshot (shared by REST + realtime)."""
-    karaoke = await session_service.get_by_id(session, session_id)
-    active = await queue_service.get_active_entries(session, session_id)
-    return QueueSnapshotResponse(
-        session_id=karaoke.id,
-        status=karaoke.status,
-        round_number=await queue_service.get_current_round_number(session, session_id),
-        queue=[
-            _entry_to_response(entry, index)
-            for index, entry in enumerate(active, start=1)
-        ],
-    )
 
 
 # --- Session-scoped: preview / submit / snapshot -------------------------------
@@ -211,14 +174,14 @@ async def submit_song(
         ) from exc
     position = await _position_of(session, session_id, entry.id)
     response = SongSubmitResponse(
-        entry=_entry_to_response(entry, position),
+        entry=queue_service.entry_response(entry, position),
         duplicate=duplicate,
         notice=DUPLICATE_NOTICE if duplicate else None,
     )
     await realtime_hub.broadcast(
         session_id,
         QueueUpdatedEvent(
-            session_id=session_id, snapshot=await _build_snapshot(session, session_id)
+            session_id=session_id, snapshot=await queue_service.snapshot(session, session_id)
         ),
     )
     return response
@@ -231,7 +194,7 @@ async def queue_snapshot(
 ) -> QueueSnapshotResponse:
     """Public queue snapshot (sanitized; no host identity or participant tokens)."""
     try:
-        return await _build_snapshot(session, session_id)
+        return await queue_service.snapshot(session, session_id)
     except SessionNotFoundError as exc:
         raise _not_found() from exc
 
@@ -252,7 +215,7 @@ async def my_entries(
     await _session_for_participant(session, session_id, participant)
     entries = await queue_service.get_participant_entries(session, participant)
     return [
-        _entry_to_response(entry, await _position_of(session, session_id, entry.id))
+        queue_service.entry_response(entry, await _position_of(session, session_id, entry.id))
         for entry in entries
     ]
 
@@ -282,7 +245,7 @@ async def delete_entry(
         entry.session_id,
         QueueUpdatedEvent(
             session_id=entry.session_id,
-            snapshot=await _build_snapshot(session, entry.session_id),
+            snapshot=await queue_service.snapshot(session, entry.session_id),
         ),
     )
 
@@ -301,12 +264,12 @@ async def edit_entry_video(
     except EntryNotFoundError as exc:
         raise _entry_not_found() from exc
     position = await _position_of(session, entry.session_id, entry.id)
-    response = _entry_to_response(entry, position)
+    response = queue_service.entry_response(entry, position)
     await realtime_hub.broadcast(
         entry.session_id,
         QueueUpdatedEvent(
             session_id=entry.session_id,
-            snapshot=await _build_snapshot(session, entry.session_id),
+            snapshot=await queue_service.snapshot(session, entry.session_id),
         ),
     )
     return response

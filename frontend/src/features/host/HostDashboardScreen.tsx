@@ -12,8 +12,18 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link, Navigate, useParams } from 'react-router-dom'
 
 import { fetchQueueSnapshot, removeEntry, editEntryVideo } from '../../api/entries'
-import { endSession, fetchSession, fetchSessionQr, startSession } from '../../api/host'
-import type { QueueEntry, QueueSnapshot, Session } from '../../api/types'
+import {
+  endSession,
+  fetchSession,
+  fetchSessionQr,
+  finishPlayback,
+  pausePlayback,
+  resumePlayback,
+  skipPlayback,
+  startPlayback,
+  startSession,
+} from '../../api/host'
+import type { PlaybackState, QueueEntry, QueueSnapshot, Session } from '../../api/types'
 import { formatDuration } from '../../lib/format'
 import { loadHostIdentity } from '../../lib/hostToken'
 import { statusLabel } from '../../lib/session'
@@ -37,6 +47,27 @@ function entryStatusLabel(status: QueueEntry['status']): string {
       return 'Cancelled'
     case 'REMOVED':
       return 'Removed'
+  }
+}
+
+function playbackLabel(state: PlaybackState | undefined): string {
+  switch (state) {
+    case 'PLAYING':
+      return 'Playing'
+    case 'IDLE':
+      return 'Idle'
+    case 'PREPARING':
+      return 'Preparing'
+    case 'COUNTDOWN':
+      return 'Countdown'
+    case 'COOLDOWN':
+      return 'Cooldown'
+    case 'FINISHED':
+      return 'Finished'
+    case 'SKIPPED':
+      return 'Skipped'
+    default:
+      return '—'
   }
 }
 
@@ -139,6 +170,34 @@ export default function HostDashboardScreen() {
       await refreshSession()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not end the session')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // M11 playback controls: the endpoints return the authoritative snapshot, so
+  // the dashboard renders it directly (the realtime channel also delivers it).
+  async function handlePlayback(action: 'start' | 'skip' | 'finish' | 'pause' | 'resume') {
+    if (!identity || busy) return
+    setBusy(action)
+    setError(null)
+    try {
+      const callbacks: Record<
+        'start' | 'skip' | 'finish' | 'pause' | 'resume',
+        () => Promise<QueueSnapshot>
+      > = {
+        start: () => startPlayback(identity.token, sessionId),
+        skip: () => skipPlayback(identity.token, sessionId),
+        finish: () => finishPlayback(identity.token, sessionId),
+        pause: () => pausePlayback(identity.token, sessionId),
+        resume: () => resumePlayback(identity.token, sessionId),
+      }
+      const snapshot = await callbacks[action]()
+      setSnapshot(snapshot)
+      // Keep the session badge in sync (pause/resume change the session status).
+      setSession((prev) => (prev ? { ...prev, status: snapshot.status } : prev))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `Could not ${action} playback`)
     } finally {
       setBusy(null)
     }
@@ -262,13 +321,7 @@ export default function HostDashboardScreen() {
               </div>
               <div className="card">
                 <p className="label">Playback</p>
-                {nowSinging ? (
-                  <p>Playing through the host device.</p>
-                ) : upNext ? (
-                  <p>Queue ready — playback automation arrives in a later milestone.</p>
-                ) : (
-                  <p className="muted">No songs queued yet.</p>
-                )}
+                <p>{snapshot ? playbackLabel(snapshot.playback_state) : '—'}</p>
               </div>
             </div>
 
@@ -278,18 +331,48 @@ export default function HostDashboardScreen() {
                   {busy === 'start' ? 'Starting…' : 'Start session'}
                 </button>
               ) : null}
-              <button className="ghost" disabled title="Arrives with playback (M11)">
-                Skip
+              {!nowSinging && snapshot && snapshot.queue.length > 0 ? (
+                <button
+                  onClick={() => void handlePlayback('start')}
+                  disabled={busy !== null}
+                >
+                  {busy === 'start' ? 'Starting…' : 'Start next song'}
+                </button>
+              ) : null}
+              <button
+                className="ghost"
+                onClick={() => void handlePlayback('skip')}
+                disabled={busy !== null || !nowSinging}
+                title={nowSinging ? undefined : 'No song is currently playing'}
+              >
+                {busy === 'skip' ? 'Skipping…' : 'Skip'}
               </button>
-              <button className="ghost" disabled title="Arrives with playback (M11)">
-                Finish
+              <button
+                className="ghost"
+                onClick={() => void handlePlayback('finish')}
+                disabled={busy !== null || !nowSinging}
+                title={nowSinging ? undefined : 'No song is currently playing'}
+              >
+                {busy === 'finish' ? 'Finishing…' : 'Finish'}
               </button>
-              <button className="ghost" disabled title="Arrives with playback (M11)">
-                Pause
-              </button>
-              <button className="ghost" disabled title="Arrives with playback (M11)">
-                Resume
-              </button>
+              {session.status === 'ACTIVE' ? (
+                <button
+                  className="ghost"
+                  onClick={() => void handlePlayback('pause')}
+                  disabled={busy !== null}
+                >
+                  {busy === 'pause' ? 'Pausing…' : 'Pause'}
+                </button>
+              ) : null}
+              {session.status === 'PAUSED' ? (
+                <button
+                  className="ghost"
+                  onClick={() => void handlePlayback('resume')}
+                  disabled={busy !== null}
+                >
+                  {busy === 'resume' ? 'Resuming…' : 'Resume'}
+                </button>
+              ) : null}
               <button className="danger" onClick={() => void handleEnd()} disabled={busy !== null}>
                 {busy === 'end' ? 'Ending…' : 'End session'}
               </button>

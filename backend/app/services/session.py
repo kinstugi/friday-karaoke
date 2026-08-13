@@ -155,6 +155,40 @@ class SessionService:
         await session.refresh(karaoke)
         return karaoke
 
+    async def pause(
+        self, session: AsyncSession, host_id: uuid.UUID, session_id: uuid.UUID
+    ) -> Session:
+        """Transition a session ``ACTIVE -> PAUSED`` (host, M11).
+
+        Holds automatic progression after the current song (E22); manual host
+        actions still work while paused.
+        """
+        karaoke = await self.get_for_host(session, host_id, session_id)
+        if not karaoke.status.can_transition_to(SessionStatus.PAUSED):
+            raise InvalidSessionTransitionError(
+                f"session {session_id} cannot be paused from state "
+                f"{karaoke.status.value}"
+            )
+        karaoke.status = SessionStatus.PAUSED
+        await session.commit()
+        await session.refresh(karaoke)
+        return karaoke
+
+    async def resume(
+        self, session: AsyncSession, host_id: uuid.UUID, session_id: uuid.UUID
+    ) -> Session:
+        """Transition a session ``PAUSED -> ACTIVE`` (host, M11)."""
+        karaoke = await self.get_for_host(session, host_id, session_id)
+        if not karaoke.status.can_transition_to(SessionStatus.ACTIVE):
+            raise InvalidSessionTransitionError(
+                f"session {session_id} cannot be resumed from state "
+                f"{karaoke.status.value}"
+            )
+        karaoke.status = SessionStatus.ACTIVE
+        await session.commit()
+        await session.refresh(karaoke)
+        return karaoke
+
     async def end(
         self, session: AsyncSession, host_id: uuid.UUID, session_id: uuid.UUID
     ) -> Session:

@@ -25,10 +25,33 @@ export interface SessionUpdatedEvent {
   status: SessionStatus
 }
 
+export interface SingerStartedEvent {
+  type: 'SingerStarted'
+  session_id: string
+  entry_id: string
+  participant_name: string
+  title: string
+}
+
+export interface SingerFinishedEvent {
+  type: 'SingerFinished'
+  session_id: string
+  entry_id: string
+}
+
+export interface SingerSkippedEvent {
+  type: 'SingerSkipped'
+  session_id: string
+  entry_id: string
+}
+
 export type RealtimeEvent =
   | QueueUpdatedEvent
   | ParticipantJoinedEvent
   | SessionUpdatedEvent
+  | SingerStartedEvent
+  | SingerFinishedEvent
+  | SingerSkippedEvent
 
 /** Build the WebSocket URL for a session, carrying the bearer token as a
  *  query parameter (the browser WebSocket API cannot set request headers). */
@@ -41,13 +64,15 @@ export function realtimeWsUrl(sessionId: string, token: string): string {
 export function parseRealtimeEvent(raw: string): RealtimeEvent | null {
   try {
     const parsed = JSON.parse(raw) as RealtimeEvent
-    if (
-      parsed.type !== 'QueueUpdated' &&
-      parsed.type !== 'ParticipantJoined' &&
-      parsed.type !== 'SessionUpdated'
-    ) {
-      return null
-    }
+    const known = [
+      'QueueUpdated',
+      'ParticipantJoined',
+      'SessionUpdated',
+      'SingerStarted',
+      'SingerFinished',
+      'SingerSkipped',
+    ]
+    if (!known.includes(parsed.type)) return null
     return parsed
   } catch {
     return null

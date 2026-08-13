@@ -21,12 +21,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from app.core.config import get_settings
+from app.domain.playback import PlaybackState
 from app.domain.queue_entry import QueueEntryStatus
 from app.models.participant import Participant
 from app.models.queue_entry import QueueEntry
 from app.models.round import Round
 from app.models.session import Session
 from app.models.youtube_video import YouTubeVideo
+from app.schemas.queue import QueueEntryResponse, QueueSnapshotResponse
 from app.schemas.youtube import YouTubeVideoData
 from app.services.session import SessionNotFoundError, session_service
 
@@ -176,6 +178,49 @@ class QueueService:
             select(func.max(Round.number)).where(Round.session_id == session_id)
         )
         return highest if highest is not None else 1
+
+    def entry_response(
+        self, entry: QueueEntry, position: int | None
+    ) -> QueueEntryResponse:
+        """Explicit mapping from the ORM model to the API schema.
+
+        Shared by the REST snapshot and the realtime ``QueueUpdated`` payloads.
+        """
+        return QueueEntryResponse(
+            id=entry.id,
+            participant_name=entry.participant.nickname,
+            status=entry.status,
+            video_id=entry.youtube_video.youtube_video_id,
+            youtube_url=entry.youtube_video.youtube_url,
+            title=entry.youtube_video.title,
+            channel=entry.youtube_video.channel,
+            duration_seconds=entry.youtube_video.duration_seconds,
+            thumbnail_url=entry.youtube_video.thumbnail_url,
+            position=position,
+            created_at=entry.created_at,
+        )
+
+    async def snapshot(
+        self, session: AsyncSession, session_id: uuid.UUID
+    ) -> QueueSnapshotResponse:
+        """Return the authoritative queue snapshot (REST + realtime, M11).
+
+        ``playback_state`` is derived: ``PLAYING`` while an entry is ``SINGING``,
+        otherwise ``IDLE`` (decision D46 — playback state is never stored).
+        """
+        karaoke = await session_service.get_by_id(session, session_id)
+        active = await self.get_active_entries(session, session_id)
+        playing = any(e.status is QueueEntryStatus.SINGING for e in active)
+        return QueueSnapshotResponse(
+            session_id=karaoke.id,
+            status=karaoke.status,
+            round_number=await self.get_current_round_number(session, session_id),
+            playback_state=PlaybackState.PLAYING if playing else PlaybackState.IDLE,
+            queue=[
+                self.entry_response(entry, index)
+                for index, entry in enumerate(active, start=1)
+            ],
+        )
 
     async def get_entry(
         self, session: AsyncSession, entry_id: uuid.UUID

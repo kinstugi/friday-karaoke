@@ -689,6 +689,37 @@ These freeze MVP product behavior. They were captured in `docs/PRODUCT_SPEC.md`.
 
 ---
 
+## M11 playback decisions
+
+## D46. Playback state is derived, not stored; host-driven controls
+
+- **Status:** Accepted
+- **Decision:** The session's playback state is **derived** from queue state —
+  `PLAYING` while an entry is `SINGING`, otherwise `IDLE` — and surfaced in the
+  queue snapshot (`playback_state`). It is never stored, so it cannot drift from
+  the queue. M11 exposes host-only endpoints under
+  `/api/v1/sessions/{id}/play/…`: `start` (promote the front of the active queue
+  to `SINGING`), `skip` (`SKIPPED` + advance, D20), `finish` (`COMPLETED` +
+  advance, D20), `pause` (`ACTIVE -> PAUSED`), `resume` (`PAUSED -> ACTIVE`).
+  Advancing promotes the next entry to `NEXT` and, because the active round is
+  derived (D43), automatically crosses into the next round. Each endpoint
+  returns the authoritative snapshot and broadcasts the matching realtime event
+  (`SingerStarted`/`SingerFinished`/`SingerSkipped` plus `QueueUpdated`;
+  `SessionUpdated` for pause/resume).
+- **Rationale:** The `PlaybackState` enum documents the full lifecycle
+  (IDLE/PREPARING/COUNTDOWN/PLAYING/COOLDOWN/FINISHED/SKIPPED), but the
+  timer-driven transient states are M13's job. Storing playback state (a column
+  that can drift) adds a second source of truth for something the queue already
+  encodes — inconsistent with D2/D8. Host-driven controls satisfy M11's
+  acceptance criterion (the backend determines the active singer) and enable the
+  dashboard's previously-disabled Skip/Finish/Pause/Resume buttons (D40) without
+  pre-empting M12 (host player) or M13 (automation timers).
+- **Rejected:** A stored `playback_state` column on sessions (drift risk, no
+  benefit — the SINGING entry is the state); implementing PREPARING/COUNTDOWN/
+  COOLDOWN timing in M11 (that is M13's automatic-transition scope).
+
+---
+
 ## Open questions (tracked)
 
 - ~~Authentication mechanism for hosts (email/password vs. school SSO)~~ — **M3

@@ -339,15 +339,49 @@ POST /sessions/{id}/entries
 }
 ```
 
-## 6. Playback + moderation (M9, M14)
+## 6. Playback (M11) — IMPLEMENTED
 
 | Method | Path                       | Auth | Description             |
 | ------ | -------------------------- | ---- | ----------------------- |
-| POST   | /sessions/{id}/play/start  | host | Start current song      |
-| POST   | /sessions/{id}/play/skip   | host | Skip current singer     |
-| POST   | /sessions/{id}/play/pause  | host | Pause automatic progression |
-| POST   | /sessions/{id}/play/resume | host | Resume progression      |
-| POST   | /sessions/{id}/next        | host | Manually advance queue  |
+| POST   | /api/v1/sessions/{id}/play/start  | host | Promote the front of the queue to SINGING |
+| POST   | /api/v1/sessions/{id}/play/skip   | host | Current singer -> SKIPPED, advance (D20) |
+| POST   | /api/v1/sessions/{id}/play/finish | host | Current singer -> COMPLETED, advance (D20) |
+| POST   | /api/v1/sessions/{id}/play/pause  | host | ACTIVE -> PAUSED |
+| POST   | /api/v1/sessions/{id}/play/resume | host | PAUSED -> ACTIVE |
+
+All return the authoritative `QueueSnapshotResponse` (which includes the derived
+`playback_state`: `PLAYING` while an entry is `SINGING`, else `IDLE` — decision
+D46) and broadcast the matching realtime events (`SingerStarted`/`SingerFinished`/
+`SingerSkipped` + `QueueUpdated`; `SessionUpdated` for pause/resume).
+
+```text
+POST /api/v1/sessions/{id}/play/start          Authorization: Bearer <host token>
+200 {
+  "session_id": "...", "status": "ACTIVE", "round_number": 1,
+  "playback_state": "PLAYING",
+  "queue": [ { "...", "status": "SINGING", "position": 1 }, ... ]
+}
+409 { "detail": "the queue is empty" }                # nothing queued
+409 { "detail": "a song is already playing" }
+404 { "detail": "session not found" }                 # unknown or another host's
+
+POST /api/v1/sessions/{id}/play/skip           # and /play/finish
+200 { ...snapshot with the current singer terminal, next entry "NEXT"... }
+409 { "detail": "no song is currently playing" }
+
+POST /api/v1/sessions/{id}/play/pause
+200 { ..., "status": "PAUSED", ... }
+409 { "detail": "session <id> cannot be paused from state CREATED" }
+
+POST /api/v1/sessions/{id}/play/resume
+200 { ..., "status": "ACTIVE", ... }
+409 { "detail": "session <id> cannot be resumed from state ACTIVE" }
+```
+
+The queue snapshot's `queue` entries carry their `SINGING`/`NEXT`/`WAITING`
+status, so clients derive "now singing" and "up next" from the authoritative
+data. Advancing past a round's last entry crosses into the next round
+automatically (M10.1/M11).
 
 ## 7. Rounds (revised at M10.1)
 

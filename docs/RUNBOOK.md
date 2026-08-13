@@ -163,9 +163,9 @@ song cap (5), duplicate-song notice, participant cancel of own WAITING entries
 screens (join/submit/queue) render exactly these backend responses; the M9 host
 dashboard (auth, home, dashboard) renders the session and queue state and drives
 the host actions (start/remove/edit/end) through the same backend.
-Skip/finish/pause/resume are visible but disabled until the M11 playback state
-machine lands. Health, host auth, sessions, join, and preview endpoints from
-M2-M6 are unchanged.
+Skip/finish/pause/resume are wired to the M11 playback endpoints
+(`/api/v1/sessions/{id}/play/…`). Health, host auth, sessions, join, and preview
+endpoints from M2-M6 are unchanged.
 
 ## UI polish verification (M9.1)
 
@@ -261,6 +261,49 @@ EOF
   (6th song → 409 "you can have at most 5 songs in the queue").
 - Round-robin assignment/ordering/auto-advance are covered by
   `backend/tests/test_queue.py` (9 new round tests).
+
+## Playback verification (M11)
+
+The host drives playback through `/api/v1/sessions/{id}/play/start|skip|finish|
+pause|resume`; the snapshot reports the derived `playback_state` and each
+entry's `SINGING`/`NEXT`/`WAITING` status. With a YouTube key in `backend/.env`,
+from `backend/`:
+
+```bash
+uv run python - <<'EOF'
+import uuid, httpx
+BASE = "http://localhost:8000"
+email = f"play-{uuid.uuid4().hex[:8]}@school.edu"
+c = httpx.Client(timeout=30)
+c.post(f"{BASE}/api/v1/auth/host/register", json={"email": email, "password": "correct-horse-battery"})
+host = c.post(f"{BASE}/api/v1/auth/host/login", json={"email": email, "password": "correct-horse-battery"}).json()["token"]
+hh = {"Authorization": f"Bearer {host}"}
+s = c.post(f"{BASE}/api/v1/sessions", json={}, headers=hh).json()
+sid, code = s["id"], s["join_code"]
+def join(n): return c.post(f"{BASE}/api/v1/join/{code}/participants", json={"nickname": n}).json()["token"]
+def submit(t, v): return c.post(f"{BASE}/api/v1/sessions/{sid}/entries",
+    json={"youtube_url": f"https://youtu.be/{v}"}, headers={"Authorization": f"Bearer {t}"}).status_code
+def play(a): return c.post(f"{BASE}/api/v1/sessions/{sid}/play/{a}", headers=hh).json()
+alice, bob = join("Alice"), join("Bob")
+submit(alice, "dQw4w9WgXcQ"); submit(bob, "9bZkp7q19f0")
+started = play("start")
+print("playback_state (expect PLAYING):", started["playback_state"])
+print("statuses (expect SINGING, WAITING):", [e["status"] for e in started["queue"]])
+print("after finish (expect IDLE, NEXT):", [(e["status"]) for e in play("finish")["queue"]])
+c.post(f"{BASE}/api/v1/sessions/{sid}/start", headers=hh)
+print("pause (expect PAUSED):", play("pause")["status"])
+print("resume (expect ACTIVE):", play("resume")["status"])
+EOF
+```
+
+- The playback endpoints are host-only: a participant token returns 401, another
+  host's token returns 404, and an ended session returns 409.
+- Playback state is derived (D46): the snapshot's `playback_state` flips to
+  `PLAYING` as soon as an entry is `SINGING`. Round boundaries auto-advance when
+  a round's last entry is finished (M10.1).
+- Realtime: `SingerStarted`/`SingerFinished`/`SingerSkipped` + `QueueUpdated`
+  events are delivered over `/api/v1/sessions/{id}/ws`; covered by
+  `backend/tests/test_playback.py` (15 tests).
 
 ## Branch / commit workflow
 

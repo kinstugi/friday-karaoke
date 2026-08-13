@@ -5,6 +5,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from app.domain.playback import PlaybackState
 from app.domain.queue_entry import QueueEntryStatus
 from app.domain.session import SessionStatus
 
@@ -52,9 +53,12 @@ class QueueSnapshotResponse(BaseModel):
 
     ``round_number`` is the active round (M10.1, D43): the round currently being
     sung, or the highest round that exists when the queue is empty.
+    ``playback_state`` is derived (M11, D46): ``PLAYING`` while an entry is
+    ``SINGING``, otherwise ``IDLE``.
     """
 
     session_id: uuid.UUID
     status: SessionStatus
     round_number: int
+    playback_state: PlaybackState
     queue: list[QueueEntryResponse]
