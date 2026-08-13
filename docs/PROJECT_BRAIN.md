@@ -171,11 +171,19 @@ song cap, sessions not tied to a browser) are in `docs/PRODUCT_SPEC.md` §8–§
 
 ## 8. Current milestone
 
-**M12 — YouTube host player** (next; frontend). M11 is complete; see
-`docs/DEV_BRAIN.md` for live status.
+**M13 — Automatic song transitions** (next; backend + frontend). M12 is
+complete; see `docs/DEV_BRAIN.md` for live status.
 
 ## 9. Completed milestones
 
+- **M12 — YouTube host player** (complete, frontend): the host dashboard embeds
+  the YouTube IFrame player (host browser is the playback device, D4). A new
+  `YouTubePlayer` component loads the `SINGING` entry's video from the snapshot,
+  attempts playback after the host's start gesture, detects completion and
+  reports it back via the M11 `finish` endpoint, and maps player errors to
+  host-facing messages (E5/E24). The IFrame API is loaded at runtime; a small
+  ambient `src/youtube.d.ts` types the YT surface (no new dependency). No
+  backend changes; suite still 199; typecheck/lint/build green.
 - **M11 — Playback state machine** (complete, backend + frontend): host-driven
   playback endpoints under `/api/v1/sessions/{id}/play/…` (start/skip/finish/
   pause/resume) that promote entries through `WAITING → SINGING → COMPLETED/
@@ -295,11 +303,13 @@ song cap, sessions not tied to a browser) are in `docs/PRODUCT_SPEC.md` §8–§
 
 ## 10. Known limitations
 
-- The host dashboard controls playback state (M11) but has **no YouTube player
-  yet** (M12): the host can start/skip/finish/pause/resume, but audio still comes
-  from wherever the host points it. Automatic (timer-driven) transitions
-  (PREPARING/COUNTDOWN/COOLDOWN) and the "you're next" notifications land in
-  M13/M15.
+- The host dashboard plays songs through the embedded YouTube player (M12), but
+  transitions are still **manual** (the host clicks "Start next song" after each
+  song): the timer-driven cooldown/countdown automation and the "you're next"
+  notifications land in M13/M15. The `PREPARING`/`COUNTDOWN`/`COOLDOWN` playback
+  states exist in the enum but are not yet reachable (D46).
+- YouTube playback is only exercisable in a real browser (autoplay policies,
+  audio output); automated checks cover the build and the backend contract.
 - Realtime (M10) delivers only the events whose producers exist: `QueueUpdated`
   (submit/cancel/remove/edit), `ParticipantJoined` (join), and `SessionUpdated`
   (start/end). Round events arrive with M10.1; singer/pause events with their

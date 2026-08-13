@@ -305,6 +305,28 @@ EOF
   events are delivered over `/api/v1/sessions/{id}/ws`; covered by
   `backend/tests/test_playback.py` (15 tests).
 
+## Host player verification (M12)
+
+The host dashboard embeds the YouTube IFrame player (host browser is the
+playback device, D4). Manual check with the backend running and a browser open
+at `http://localhost:5173/host/sessions/<id>`:
+
+1. Log in as the host and open a session (or create one).
+2. Have a participant submit a song (needs `KARAOKE_YOUTUBE_API_KEY` in
+   `backend/.env`), then click **Start next song**.
+3. The player (Playback card) loads the `SINGING` entry's video and attempts to
+   play it through the host machine's speakers. If the browser blocks autoplay,
+   click the embedded player's native play button (E24).
+4. When the video ends, the dashboard auto-calls `finish` (M11): the entry
+   becomes `COMPLETED`, the next one becomes `NEXT`, and "Start next song"
+   appears again. **Skip** and **Finish** stop the current video and advance.
+5. A broken/embedding-restricted video shows an error in the Playback card
+   (E5/E24); the host can **Skip** it or **Edit** its URL.
+
+Automation note: transitions are still manual until M13 wires the cooldown/
+countdown timers. The player needs a real browser — it cannot be verified by the
+agent test suite (which covers the build and the backend contract).
+
 ## Branch / commit workflow
 
 - Development happens on `dev`. Never commit directly to `master`.

@@ -148,7 +148,8 @@ frontend/
             join/       # QR join flow (JoinScreen)
             submit/     # song submission (SubmitSongScreen)
             queue/      # participant queue view (QueueScreen)
-            host/       # host dashboard (HostAuthScreen, HostHomeScreen, HostDashboardScreen)
+            host/       # host dashboard (HostAuthScreen, HostHomeScreen,
+                        # HostDashboardScreen + YouTubePlayer (M12))
         app/       # routing, providers
         components/
         lib/       # shared utilities (token/hostToken persistence, formatting, session labels)
@@ -256,8 +257,12 @@ get correct state from the API.
   through `WAITING → SINGING → COMPLETED/SKIPPED` (+ `NEXT` on advance); playback
   state is derived (`PLAYING` iff `SINGING`, D46); `PAUSED` becomes reachable;
   `SingerStarted`/`SingerFinished`/`SingerSkipped` realtime events.
-- **M12–M16** — host player + automation + round lifecycle cleanup +
-  notifications.
+- **M12** — YouTube host player (complete, frontend): the host dashboard embeds
+  the YouTube IFrame player (`src/features/host/YouTubePlayer.tsx`); it plays the
+  `SINGING` entry's video on the host device (D4), reports completion back via
+  the M11 `finish` endpoint, and surfaces player errors (E5/E24). The IFrame API
+  loads at runtime; `src/youtube.d.ts` types the YT surface.
+- **M13–M16** — automation + round lifecycle cleanup + notifications.
 - **M17–M19** — security, testing, PWA/mobile UX.
 - **M20–M22** — deployment, pilot, fixes.
 

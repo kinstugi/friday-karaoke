@@ -1,14 +1,13 @@
 // Host dashboard (M9, PRODUCT_SPEC §5.3-5.7 / §7.4): the host's single control
-// screen for the projector — current singer/song, playback status, full queue
-// (names, titles, durations), QR + join code, and moderation actions
-// (start, remove, edit, end session) using the host endpoints from M4/M7.
+// screen for the projector — current singer/song, playback status, the YouTube
+// host player (M12, D4), full queue (names, titles, durations), QR + join code,
+// and moderation actions driven by the M4/M7/M11 host endpoints.
 //
-// Playback-dependent actions (skip, finish, pause, resume) are rendered but
-// disabled: they require the M11 playback state machine and M14 endpoints,
-// which are not part of this milestone. Queue/session state is always re-read
-// from the backend; the screen subscribes to the M10 realtime channel and only
-// falls back to polling while disconnected (D2, D5, B13).
-import { useCallback, useEffect, useState } from 'react'
+// Queue/session state is always re-read from the backend; the screen subscribes
+// to the M10 realtime channel and only falls back to polling while disconnected
+// (D2, D5, B13). The embedded YouTube player plays the SINGING entry's video on
+// the host device and reports completion back via the M11 finish endpoint.
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, Navigate, useParams } from 'react-router-dom'
 
 import { fetchQueueSnapshot, removeEntry, editEntryVideo } from '../../api/entries'
@@ -28,6 +27,7 @@ import { formatDuration } from '../../lib/format'
 import { loadHostIdentity } from '../../lib/hostToken'
 import { statusLabel } from '../../lib/session'
 import { useRealtime } from '../../ws/useRealtime'
+import YouTubePlayer from './YouTubePlayer'
 
 const POLL_INTERVAL_MS = 5000
 
@@ -79,10 +79,16 @@ export default function HostDashboardScreen() {
   const [snapshot, setSnapshot] = useState<QueueSnapshot | null>(null)
   const [qrSvg, setQrSvg] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [playerError, setPlayerError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editUrl, setEditUrl] = useState('')
   const [connected, setConnected] = useState(false)
+
+  // Latest current singer, so the player's onEnded handler can guard against
+  // finishing an entry that was already skipped/removed.
+  const nowSingingRef = useRef<QueueEntry | null>(null)
+  nowSingingRef.current = snapshot?.queue.find((e) => e.status === 'SINGING') ?? null
 
   const refreshQueue = useCallback(async () => {
     try {
@@ -181,6 +187,7 @@ export default function HostDashboardScreen() {
     if (!identity || busy) return
     setBusy(action)
     setError(null)
+    setPlayerError(null)
     try {
       const callbacks: Record<
         'start' | 'skip' | 'finish' | 'pause' | 'resume',
@@ -228,6 +235,7 @@ export default function HostDashboardScreen() {
     if (editUrl.trim() === '') return
     setBusy(`edit:${entry.id}`)
     setError(null)
+    setPlayerError(null)
     try {
       await editEntryVideo(entry.id, identity.token, editUrl.trim())
       setEditingId(null)
@@ -322,6 +330,22 @@ export default function HostDashboardScreen() {
               <div className="card">
                 <p className="label">Playback</p>
                 <p>{snapshot ? playbackLabel(snapshot.playback_state) : '—'}</p>
+                {/* The host browser is the playback device (D4, M12): the
+                    player plays the current SINGING entry's video on the host
+                    machine and reports completion back via finish (M11). */}
+                <YouTubePlayer
+                  videoId={nowSingingRef.current?.video_id ?? null}
+                  playerKey={nowSingingRef.current?.id ?? null}
+                  onEnded={() => {
+                    // Guard: only advance when this video is still the singer
+                    // (the host may have skipped/removed it meanwhile).
+                    if (nowSingingRef.current) void handlePlayback('finish')
+                  }}
+                  onError={setPlayerError}
+                />
+                {playerError ? (
+                  <p className="error-text">{playerError}</p>
+                ) : null}
               </div>
             </div>
 
