@@ -15,7 +15,11 @@ from datetime import datetime, timedelta, timezone
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.queue_entry import QueueEntryStatus
+from app.models.queue_entry import QueueEntry
 from app.schemas.youtube import YouTubeVideoData
 from app.services.youtube import (
     YouTubeVideoUnavailableError,
@@ -116,14 +120,14 @@ def _submit(
     )
 
 
-def _snapshot(client: TestClient, session_id: str) -> dict:
-    return client.get(f"{SESSIONS_URL}/{session_id}/entries").json()
-
-
 def _play(client: TestClient, session_id: str, headers: dict, action: str) -> httpx.Response:
     return client.post(
         f"{SESSIONS_URL}/{session_id}/play/{action}", headers=headers
     )
+
+
+def _snapshot(client: TestClient, session_id: str) -> dict:
+    return client.get(f"{SESSIONS_URL}/{session_id}/entries").json()
 
 
 # --- Authorization / ownership --------------------------------------------------
@@ -610,3 +614,102 @@ def test_advance_broadcasts_singer_started_on_auto_start(
         events = {ws.receive_json()["type"], ws.receive_json()["type"]}
         assert "SingerStarted" in events
         assert "QueueUpdated" in events
+
+
+# --- Host moderation (M14) --------------------------------------------------------
+
+
+def test_remove_current_singer_advances_playback(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_youtube(monkeypatch, {VIDEO_A_ID: _video(VIDEO_A_ID, "Song A")})
+    headers, session_body, alice = _setup_with_timings(client, 10, 20, monkeypatch)
+    bob = _join(client, session_body, "Bob")
+    _submit(client, session_body["id"], alice, VIDEO_A_ID)
+    _submit(client, session_body["id"], bob, VIDEO_A_ID)
+    started = _play(client, session_body["id"], headers, "start")
+    singing_id = started.json()["queue"][0]["id"]
+
+    removed = client.delete(f"{ENTRIES_URL}/{singing_id}", headers=headers)
+    assert removed.status_code == 204, removed.text
+
+    body = _snapshot(client, session_body["id"])
+    # E6: removing the current singer advances playback — the next entry is
+    # promoted and the countdown transition begins (host intervention skips the
+    # cooldown, D20).
+    assert body["playback_state"] == "COUNTDOWN"
+    assert body["transition_until"] is not None
+    assert [e["status"] for e in body["queue"]] == ["NEXT"]
+    assert body["queue"][0]["participant_name"] == "Bob"
+
+
+def test_remove_current_singer_only_entry_returns_idle(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_youtube(monkeypatch, {VIDEO_A_ID: _video(VIDEO_A_ID, "Song A")})
+    headers, session_body, token = _setup_with_timings(client, 10, 20, monkeypatch)
+    _submit(client, session_body["id"], token, VIDEO_A_ID)
+    started = _play(client, session_body["id"], headers, "start")
+    singing_id = started.json()["queue"][0]["id"]
+
+    removed = client.delete(f"{ENTRIES_URL}/{singing_id}", headers=headers)
+    assert removed.status_code == 204, removed.text
+
+    body = _snapshot(client, session_body["id"])
+    assert body["playback_state"] == "IDLE"
+    assert body["transition_until"] is None
+    assert body["queue"] == []
+
+
+def test_remove_next_entry_mid_countdown_self_heals(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_youtube(monkeypatch, {VIDEO_A_ID: _video(VIDEO_A_ID, "Song A")})
+    headers, session_body, alice = _setup_with_timings(client, 0, 0, monkeypatch)
+    bob = _join(client, session_body, "Bob")
+    charlie = _join(client, session_body, "Charlie")
+    _submit(client, session_body["id"], alice, VIDEO_A_ID)
+    _submit(client, session_body["id"], bob, VIDEO_A_ID)
+    _submit(client, session_body["id"], charlie, VIDEO_A_ID)
+    _play(client, session_body["id"], headers, "start")
+    finished = _play(client, session_body["id"], headers, "finish")  # -> COUNTDOWN
+    next_id = finished.json()["queue"][0]["id"]
+    assert finished.json()["queue"][0]["participant_name"] == "Bob"
+
+    # The host removes the NEXT entry during the countdown.
+    removed = client.delete(f"{ENTRIES_URL}/{next_id}", headers=headers)
+    assert removed.status_code == 204, removed.text
+
+    # Advancing past the deadline starts the NEW front (Charlie) — self-healing.
+    body = _play(client, session_body["id"], headers, "advance")
+    assert body.status_code == 200, body.text
+    json_body = body.json()
+    assert json_body["playback_state"] == "PLAYING"
+    assert [e["participant_name"] for e in json_body["queue"]] == ["Charlie"]
+    assert json_body["queue"][0]["status"] == "SINGING"
+
+
+async def test_remove_terminal_entry_is_noop(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, session: AsyncSession
+) -> None:
+    """E21: removing an already-terminal entry is a no-op (does not overwrite
+    the CANCELLED status with REMOVED)."""
+    _patch_youtube(monkeypatch, {VIDEO_A_ID: _video(VIDEO_A_ID, "Song A")})
+    headers, session_body, token = _setup(client)
+    submitted = _submit(client, session_body["id"], token, VIDEO_A_ID)
+    entry_id = submitted.json()["entry"]["id"]
+
+    # The participant cancels first -> CANCELLED.
+    cancelled = client.delete(
+        f"{ENTRIES_URL}/{entry_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert cancelled.status_code == 204, cancelled.text
+
+    # The host then removes the same entry -> no-op (204, status preserved).
+    removed = client.delete(f"{ENTRIES_URL}/{entry_id}", headers=headers)
+    assert removed.status_code == 204, removed.text
+
+    stored = await session.scalar(select(QueueEntry).where(QueueEntry.id == uuid.UUID(entry_id)))
+    assert stored is not None
+    assert stored.status is QueueEntryStatus.CANCELLED

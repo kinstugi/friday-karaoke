@@ -190,6 +190,23 @@ class PlaybackService:
 
     # --- internals -------------------------------------------------------------
 
+    async def on_singer_removed(
+        self, session: AsyncSession, host_id: uuid.UUID, session_id: uuid.UUID
+    ) -> None:
+        """Advance playback after the host removed the current ``SINGING`` entry.
+
+        The entry is already ``REMOVED`` (E6): promote the new front to ``NEXT``
+        and begin the countdown transition — a host intervention skips the
+        post-song cooldown (D20). If no entry remains, playback returns to
+        ``IDLE``. On an ended session (cleanup) there is no playback to advance.
+        """
+        karaoke = await session_service.get_for_host(session, host_id, session_id)
+        if karaoke.status is SessionStatus.ENDED:
+            return
+        await self._promote_next(session, session_id)
+        await self._begin_transition(session, karaoke, skip_cooldown=True)
+        await session.commit()
+
     async def _advance(
         self,
         session: AsyncSession,

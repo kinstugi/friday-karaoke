@@ -273,21 +273,26 @@ class QueueService:
 
     async def remove(
         self, session: AsyncSession, host_id: uuid.UUID, entry_id: uuid.UUID
-    ) -> QueueEntry:
-        """Remove any entry in one of the host's sessions (B4).
+    ) -> tuple[QueueEntry, bool]:
+        """Remove any entry in one of the host's sessions (B4, M14).
 
-        Returns the updated entry (the caller needs its ``session_id`` to
-        publish the realtime ``QueueUpdated`` event).
+        Returns ``(entry, was_singing)`` so the caller can advance playback when
+        the current singer was removed (E6). Removing an entry that is already
+        terminal is a no-op (E21 — e.g. the participant cancelled it first): the
+        entry is returned unchanged.
         """
         entry = await self.get_entry(session, entry_id)
         try:
             await session_service.get_for_host(session, host_id, entry.session_id)
         except SessionNotFoundError as exc:
             raise EntryNotFoundError(entry_id) from exc
+        if entry.status not in QueueEntryStatus.non_terminal():
+            return entry, False
+        was_singing = entry.status is QueueEntryStatus.SINGING
         entry.status = QueueEntryStatus.REMOVED
         entry.ended_at = datetime.now(timezone.utc)
         await session.commit()
-        return entry
+        return entry, was_singing
 
     async def edit_video(
         self,

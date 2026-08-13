@@ -373,6 +373,25 @@ EOF
 - Covered by `backend/tests/test_playback.py` (8 transition tests) and the live
   smoke above.
 
+## Host moderation verification (M14)
+
+The host's full authority surface is live (PRODUCT_SPEC §5.5). The moderation
+behavior new to M14 — removing the current singer advances playback — is quick
+to check:
+
+```bash
+# (session started, a song SINGING, more songs queued)
+curl -X DELETE http://localhost:8000/api/v1/entries/<singing_entry_id> \
+  -H "Authorization: Bearer <host_token>"          # 204
+curl http://localhost:8000/api/v1/sessions/<id>/entries
+# -> playback_state "COUNTDOWN", the next entry promoted to "NEXT"
+```
+
+- Remove / Edit / Skip / Finish / Pause / Resume / End all work from the
+  dashboard; removing the current singer auto-advances (E6), and removing an
+  already-terminal entry is a no-op (E21).
+- Covered by `backend/tests/test_playback.py` (4 moderation tests).
+
 ## Branch / commit workflow
 
 - Development happens on `dev`. Never commit directly to `master`.

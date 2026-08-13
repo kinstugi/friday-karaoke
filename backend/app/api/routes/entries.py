@@ -51,6 +51,7 @@ from app.services.queue import (
     SongLimitError,
     queue_service,
 )
+from app.services.playback import playback_service
 from app.services.session import SessionNotFoundError, session_service
 from app.services.youtube import (
     YouTubeServiceConfigurationError,
@@ -229,12 +230,22 @@ async def delete_entry(
     actor: Annotated[Host | Participant, Depends(get_host_or_participant)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
-    """Cancel own WAITING entry (participant, B3) or remove any entry (host, B4)."""
+    """Cancel own WAITING entry (participant, B3) or remove any entry (host, B4).
+
+    Removing the current ``SINGING`` entry advances playback to the next
+    (E6/M14): the host recovers from a bad live song without database access.
+    """
     try:
         if isinstance(actor, Participant):
             entry = await queue_service.cancel(session, actor, entry_id)
         else:
-            entry = await queue_service.remove(session, actor.id, entry_id)
+            entry, was_singing = await queue_service.remove(
+                session, actor.id, entry_id
+            )
+            if was_singing:
+                await playback_service.on_singer_removed(
+                    session, actor.id, entry.session_id
+                )
     except EntryNotFoundError as exc:
         raise _entry_not_found() from exc
     except EntryNotCancellableError as exc:

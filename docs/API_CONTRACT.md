@@ -292,7 +292,11 @@ participant and "remove any entry" for a host (decision D37); unknown entries or
 entries outside the actor's reach return 404 (no existence leak). Since M10.1
 (D43) cancelling works for **any** of the participant's own WAITING entries,
 including songs assigned to future rounds (they leave their round; the queue is
-unchanged because they were never in the active queue).
+unchanged because they were never in the active queue). Since M14 (E6), **removing
+the current `SINGING` entry advances playback** — the next entry is promoted to
+`NEXT` and the countdown transition begins (skipping the cooldown, D20) — so the
+host can cut a bad live song without database access. Removing an already-terminal
+entry is a no-op (the status is preserved, E21).
 
 ### Preview (M6) — IMPLEMENTED
 

@@ -171,11 +171,18 @@ song cap, sessions not tied to a browser) are in `docs/PRODUCT_SPEC.md` §8–§
 
 ## 8. Current milestone
 
-**M14 — Host moderation + manual controls** (next; backend + frontend). M13 is
-complete; see `docs/DEV_BRAIN.md` for live status.
+**M15 — Next-singer notifications** (next; backend + frontend). M14 is complete;
+see `docs/DEV_BRAIN.md` for live status.
 
 ## 9. Completed milestones
 
+- **M14 — Host moderation + manual controls** (complete, backend): the host's
+  full authority surface is live (PRODUCT_SPEC §5.5): Remove + Edit (M7),
+  Skip/Finish/Pause/Resume (M11/M13), End session (M4). M14 closes the last
+  gap — **removing the current `SINGING` entry advances playback** (promotes the
+  next to `NEXT` and begins the countdown, E6), so the host can recover from a
+  bad live song without database access; removing an already-terminal entry is a
+  no-op (E21). 4 new tests (suite 212); pyright 0; live smoke confirmed.
 - **M13 — Automatic song transitions** (complete, backend + frontend): sessions
   gain stored playback state + authoritative transition deadlines
   (`playback_state`, `transition_until`, per-session `cooldown_seconds`/
@@ -185,7 +192,7 @@ complete; see `docs/DEV_BRAIN.md` for live status.
   cooldown (D20). The host dashboard counts down and calls advance; a reopened
   tab   self-recovers. `COOLDOWN`/`COUNTDOWN` are now reachable (D46 superseded by
   D47; `PREPARING` remains a documented enum value — the player pre-loads during
-  the countdown). 8 new tests (suite 207); pyright 0; live smoke verified
+  the countdown). 8 new tests (suite 208); pyright 0; live smoke verified
   the full transition cycle against Postgres + real YouTube.
 - **M12 — YouTube host player** (complete, frontend): the host dashboard embeds
   the YouTube IFrame player (host browser is the playback device, D4). A new

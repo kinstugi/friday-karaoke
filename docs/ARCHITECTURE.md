@@ -270,7 +270,12 @@ get correct state from the API.
   auto-start via the idempotent `play/advance` (no background timers; the
   dashboard counts down and advances); skip/finish skip the cooldown (D20);
   pause cancels a pending transition.
-- **M14–M16** — moderation polish + round summaries + notifications.
+- **M14** — host moderation + manual controls (complete): the host authority
+  surface is live — removing the current `SINGING` entry advances playback
+  (promote next → `NEXT` → countdown transition, E6), removing an already-
+  terminal entry is a no-op (E21); skip/finish/pause/resume/edit/end all wired
+  from earlier milestones.
+- **M15–M16** — notifications + round lifecycle cleanup + summaries.
 - **M17–M19** — security, testing, PWA/mobile UX.
 - **M20–M22** — deployment, pilot, fixes.
 
