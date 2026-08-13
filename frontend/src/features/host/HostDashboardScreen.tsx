@@ -11,7 +11,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, Navigate, useParams } from 'react-router-dom'
 
 import { fetchQueueSnapshot, removeEntry, editEntryVideo } from '../../api/entries'
+import { ApiError } from '../../api/client'
 import {
+  advancePlayback,
+  endPlayback,
   endSession,
   fetchSession,
   fetchSessionQr,
@@ -26,6 +29,7 @@ import type { PlaybackState, QueueEntry, QueueSnapshot, Session } from '../../ap
 import { formatDuration } from '../../lib/format'
 import { loadHostIdentity } from '../../lib/hostToken'
 import { statusLabel } from '../../lib/session'
+import { useTransitionRemaining } from '../../lib/transition'
 import { useRealtime } from '../../ws/useRealtime'
 import YouTubePlayer from './YouTubePlayer'
 
@@ -148,6 +152,16 @@ export default function HostDashboardScreen() {
     },
   })
 
+  // M13 automatic transitions: count down to the authoritative deadline and
+  // call advance when it passes (the backend owns the timing, D47). Placed
+  // before the identity early-return so the hook always runs in the same order.
+  const inTransition =
+    snapshot?.playback_state === 'COOLDOWN' || snapshot?.playback_state === 'COUNTDOWN'
+  const transitionRemaining = useTransitionRemaining(
+    inTransition ? (snapshot?.transition_until ?? null) : null,
+    () => void handlePlayback('advance'),
+  )
+
   if (!identity) {
     return <Navigate to="/host/login" replace />
   }
@@ -181,21 +195,25 @@ export default function HostDashboardScreen() {
     }
   }
 
-  // M11 playback controls: the endpoints return the authoritative snapshot, so
-  // the dashboard renders it directly (the realtime channel also delivers it).
-  async function handlePlayback(action: 'start' | 'skip' | 'finish' | 'pause' | 'resume') {
+  // M11/M13 playback controls: the endpoints return the authoritative snapshot,
+  // so the dashboard renders it directly (the realtime channel also delivers it).
+  async function handlePlayback(
+    action: 'start' | 'end' | 'skip' | 'finish' | 'advance' | 'pause' | 'resume',
+  ) {
     if (!identity || busy) return
     setBusy(action)
     setError(null)
     setPlayerError(null)
     try {
       const callbacks: Record<
-        'start' | 'skip' | 'finish' | 'pause' | 'resume',
+        'start' | 'end' | 'skip' | 'finish' | 'advance' | 'pause' | 'resume',
         () => Promise<QueueSnapshot>
       > = {
         start: () => startPlayback(identity.token, sessionId),
+        end: () => endPlayback(identity.token, sessionId),
         skip: () => skipPlayback(identity.token, sessionId),
         finish: () => finishPlayback(identity.token, sessionId),
+        advance: () => advancePlayback(identity.token, sessionId),
         pause: () => pausePlayback(identity.token, sessionId),
         resume: () => resumePlayback(identity.token, sessionId),
       }
@@ -204,7 +222,11 @@ export default function HostDashboardScreen() {
       // Keep the session badge in sync (pause/resume change the session status).
       setSession((prev) => (prev ? { ...prev, status: snapshot.status } : prev))
     } catch (err) {
-      setError(err instanceof Error ? err.message : `Could not ${action} playback`)
+      // A stale advance (the deadline already passed elsewhere, e.g. another
+      // tab) is a harmless 409 — the snapshot re-syncs via the realtime channel.
+      if (!(action === 'advance' && err instanceof ApiError && err.status === 409)) {
+        setError(err instanceof Error ? err.message : `Could not ${action} playback`)
+      }
     } finally {
       setBusy(null)
     }
@@ -332,19 +354,28 @@ export default function HostDashboardScreen() {
                 <p>{snapshot ? playbackLabel(snapshot.playback_state) : '—'}</p>
                 {/* The host browser is the playback device (D4, M12): the
                     player plays the current SINGING entry's video on the host
-                    machine and reports completion back via finish (M11). */}
+                    machine. A natural video end is reported via play/end (M13),
+                    which starts the cooldown → countdown → auto-start. */}
                 <YouTubePlayer
                   videoId={nowSingingRef.current?.video_id ?? null}
                   playerKey={nowSingingRef.current?.id ?? null}
                   onEnded={() => {
                     // Guard: only advance when this video is still the singer
                     // (the host may have skipped/removed it meanwhile).
-                    if (nowSingingRef.current) void handlePlayback('finish')
+                    if (nowSingingRef.current) void handlePlayback('end')
                   }}
                   onError={setPlayerError}
                 />
                 {playerError ? (
                   <p className="error-text">{playerError}</p>
+                ) : null}
+                {inTransition && transitionRemaining !== null ? (
+                  <p className="muted transition-note">
+                    {snapshot.playback_state === 'COOLDOWN'
+                      ? 'Rest before the next singer'
+                      : 'Next singer starts'}{' '}
+                    in {Math.ceil(transitionRemaining)}s
+                  </p>
                 ) : null}
               </div>
             </div>

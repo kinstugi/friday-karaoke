@@ -11,6 +11,7 @@ import type { QueueEntry, QueueSnapshot } from '../../api/types'
 import { formatDuration } from '../../lib/format'
 import { statusLabel } from '../../lib/session'
 import { loadIdentity } from '../../lib/token'
+import { useTransitionRemaining } from '../../lib/transition'
 import { useRealtime } from '../../ws/useRealtime'
 
 const POLL_INTERVAL_MS = 5000
@@ -86,6 +87,13 @@ export default function QueueScreen() {
     },
   })
 
+  // M13: show the next singer's countdown while an automatic transition runs.
+  const inTransition =
+    snapshot?.playback_state === 'COOLDOWN' || snapshot?.playback_state === 'COUNTDOWN'
+  const transitionRemaining = useTransitionRemaining(
+    inTransition ? (snapshot?.transition_until ?? null) : null,
+  )
+
   async function handleCancel(entry: QueueEntry) {
     if (!identity) return
     try {
@@ -150,7 +158,12 @@ export default function QueueScreen() {
             <div className="card">
               <p className="label">Up next</p>
               <h3>{upNext.title}</h3>
-              <p className="muted">{upNext.participant_name}</p>
+              <p className="muted">
+                {upNext.participant_name}
+                {inTransition && transitionRemaining !== null
+                  ? ` · starts in ${Math.ceil(transitionRemaining)}s`
+                  : ''}
+              </p>
             </div>
           ) : null}
 

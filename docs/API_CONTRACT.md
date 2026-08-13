@@ -136,6 +136,7 @@ GET /api/v1/sessions                Authorization: Bearer <token>    # M9 dashbo
 POST /api/v1/sessions                  Authorization: Bearer <token>
 { }                                    # name optional; defaults below
 # or { "name": "Spring Concert Night" }
+# or { "name": "...", "cooldown_seconds": 10, "countdown_seconds": 20 }  # M13 timings
 
 201 {
   "id": "d4c7a99f-...",
@@ -143,13 +144,16 @@ POST /api/v1/sessions                  Authorization: Bearer <token>
   "join_code": "K7X3QP",                   # unambiguous alphabet, 6 chars (D27)
   "join_url": "http://localhost:5173/join/K7X3QP",   # {KARAOKE_PUBLIC_BASE_URL}/join/{code} (D28)
   "status": "CREATED",
+  "playback_state": "IDLE",                # stored (M13, D47)
+  "cooldown_seconds": 10,                  # per-session automatic-transition timings (M13)
+  "countdown_seconds": 20,
   "created_at": "2026-08-10T22:43:00Z",
   "started_at": null,
   "ended_at": null
 }
 
 401 { "detail": "authentication required" }     # missing/invalid token
-422 { "detail": [...] }                          # name > 100 chars
+422 { "detail": [...] }                          # name > 100 chars, or timings out of 0..3600
 ```
 
 ```text
@@ -339,49 +343,63 @@ POST /sessions/{id}/entries
 }
 ```
 
-## 6. Playback (M11) — IMPLEMENTED
+## 6. Playback (M11, M13) — IMPLEMENTED
 
 | Method | Path                       | Auth | Description             |
 | ------ | -------------------------- | ---- | ----------------------- |
-| POST   | /api/v1/sessions/{id}/play/start  | host | Promote the front of the queue to SINGING |
-| POST   | /api/v1/sessions/{id}/play/skip   | host | Current singer -> SKIPPED, advance (D20) |
-| POST   | /api/v1/sessions/{id}/play/finish | host | Current singer -> COMPLETED, advance (D20) |
-| POST   | /api/v1/sessions/{id}/play/pause  | host | ACTIVE -> PAUSED |
+| POST   | /api/v1/sessions/{id}/play/start  | host | Manually start the front of the queue (→ SINGING; cancels any pending transition) |
+| POST   | /api/v1/sessions/{id}/play/end    | host | The host player reports the video ended naturally (→ COMPLETED, then COOLDOWN → COUNTDOWN → auto-start, M13) |
+| POST   | /api/v1/sessions/{id}/play/skip   | host | Current singer -> SKIPPED, then the countdown (D20/M13) |
+| POST   | /api/v1/sessions/{id}/play/finish | host | Current singer -> COMPLETED, then the countdown (D20/M13) |
+| POST   | /api/v1/sessions/{id}/play/advance | host | Progress an automatic transition whose phase deadline passed (M13: COOLDOWN -> COUNTDOWN -> auto-start) |
+| POST   | /api/v1/sessions/{id}/play/pause  | host | ACTIVE -> PAUSED (cancels any pending transition) |
 | POST   | /api/v1/sessions/{id}/play/resume | host | PAUSED -> ACTIVE |
 
-All return the authoritative `QueueSnapshotResponse` (which includes the derived
-`playback_state`: `PLAYING` while an entry is `SINGING`, else `IDLE` — decision
-D46) and broadcast the matching realtime events (`SingerStarted`/`SingerFinished`/
-`SingerSkipped` + `QueueUpdated`; `SessionUpdated` for pause/resume).
+All return the authoritative `QueueSnapshotResponse`. Its `playback_state` is
+the stored state (D47): `PLAYING` while an entry is `SINGING`, `IDLE` when idle,
+and `COOLDOWN`/`COUNTDOWN` during an automatic transition. The snapshot also
+carries `transition_until` (absolute deadline) and
+`transition_remaining_seconds` for countdown display; the host dashboard calls
+`play/advance` when the deadline passes (idempotent — a reopened tab with an
+overdue deadline self-recovers). Per-session timings are set at session creation
+(`cooldown_seconds`, `countdown_seconds`; defaults 10/20).
 
 ```text
 POST /api/v1/sessions/{id}/play/start          Authorization: Bearer <host token>
 200 {
   "session_id": "...", "status": "ACTIVE", "round_number": 1,
-  "playback_state": "PLAYING",
+  "playback_state": "PLAYING", "transition_until": null,
+  "transition_remaining_seconds": null,
   "queue": [ { "...", "status": "SINGING", "position": 1 }, ... ]
 }
 409 { "detail": "the queue is empty" }                # nothing queued
 409 { "detail": "a song is already playing" }
 404 { "detail": "session not found" }                 # unknown or another host's
 
+POST /api/v1/sessions/{id}/play/end            # natural video end (M13)
+200 { ..., "playback_state": "COOLDOWN", "transition_until": "...",
+      "transition_remaining_seconds": 9.8, "queue": [ { ..., "status": "NEXT" } ] }
+409 { "detail": "no song is currently playing" }
+
+POST /api/v1/sessions/{id}/play/advance        # when the phase deadline passed
+200 { ..., "playback_state": "COUNTDOWN", ... }        # COOLDOWN -> COUNTDOWN
+200 { ..., "playback_state": "PLAYING", "queue": [ { ..., "status": "SINGING" } ] }  # -> auto-start
+409 { "detail": "cooldown is still running" }   # / "countdown is still running"
+409 { "detail": "no automatic transition in progress" }
+
 POST /api/v1/sessions/{id}/play/skip           # and /play/finish
-200 { ...snapshot with the current singer terminal, next entry "NEXT"... }
+200 { ..., "playback_state": "COUNTDOWN", "queue": [ { ..., "status": "NEXT" } ] }
 409 { "detail": "no song is currently playing" }
 
 POST /api/v1/sessions/{id}/play/pause
-200 { ..., "status": "PAUSED", ... }
+200 { ..., "status": "PAUSED", "playback_state": "IDLE", ... }
 409 { "detail": "session <id> cannot be paused from state CREATED" }
-
-POST /api/v1/sessions/{id}/play/resume
-200 { ..., "status": "ACTIVE", ... }
-409 { "detail": "session <id> cannot be resumed from state ACTIVE" }
 ```
 
 The queue snapshot's `queue` entries carry their `SINGING`/`NEXT`/`WAITING`
 status, so clients derive "now singing" and "up next" from the authoritative
 data. Advancing past a round's last entry crosses into the next round
-automatically (M10.1/M11).
+automatically (M10.1/M13).
 
 ## 7. Rounds (revised at M10.1)
 

@@ -323,9 +323,55 @@ at `http://localhost:5173/host/sessions/<id>`:
 5. A broken/embedding-restricted video shows an error in the Playback card
    (E5/E24); the host can **Skip** it or **Edit** its URL.
 
-Automation note: transitions are still manual until M13 wires the cooldown/
-countdown timers. The player needs a real browser — it cannot be verified by the
+Automation note: transitions are automatic since M13 (cooldown → countdown →
+auto-start). The player needs a real browser — it cannot be verified by the
 agent test suite (which covers the build and the backend contract).
+
+## Automatic transitions verification (M13)
+
+Songs advance automatically: natural end → `play/end` → COOLDOWN → COUNTDOWN →
+auto-start, with per-session `cooldown_seconds`/`countdown_seconds` (defaults
+10/20). The host dashboard counts down and calls `play/advance` at zero. From
+`backend/` (with a YouTube key in `backend/.env`):
+
+```bash
+uv run python - <<'EOF'
+import uuid, time, httpx
+BASE = "http://localhost:8000"
+email = f"trans-{uuid.uuid4().hex[:8]}@school.edu"
+c = httpx.Client(timeout=30)
+c.post(f"{BASE}/api/v1/auth/host/register", json={"email": email, "password": "correct-horse-battery"})
+host = c.post(f"{BASE}/api/v1/auth/host/login", json={"email": email, "password": "correct-horse-battery"}).json()["token"]
+hh = {"Authorization": f"Bearer {host}"}
+s = c.post(f"{BASE}/api/v1/sessions", json={"cooldown_seconds": 1, "countdown_seconds": 1}, headers=hh).json()
+sid, code = s["id"], s["join_code"]
+alice = c.post(f"{BASE}/api/v1/join/{code}/participants", json={"nickname": "Alice"}).json()["token"]
+c.post(f"{BASE}/api/v1/sessions/{sid}/entries", json={"youtube_url": "https://youtu.be/dQw4w9WgXcQ"},
+       headers={"Authorization": f"Bearer {alice}"})
+bob = c.post(f"{BASE}/api/v1/join/{code}/participants", json={"nickname": "Bob"}).json()["token"]
+c.post(f"{BASE}/api/v1/sessions/{sid}/entries", json={"youtube_url": "https://youtu.be/9bZkp7q19f0"},
+       headers={"Authorization": f"Bearer {bob}"})
+def play(a):
+    r = c.post(f"{BASE}/api/v1/sessions/{sid}/play/{a}", headers=hh)
+    return r.json() if r.status_code == 200 else r.json()
+print("start:", play("start")["playback_state"])
+print("end:", play("end")["playback_state"], "(expect COOLDOWN, ~1s remaining)")
+print("advance before deadline (expect 409):", play("advance")["detail"])
+time.sleep(1.2)
+print("advance ->", play("advance")["playback_state"], "(expect COUNTDOWN)")
+time.sleep(1.2)
+started = play("advance")
+print("advance ->", started["playback_state"], "(expect PLAYING)", [e["status"] for e in started["queue"]])
+EOF
+```
+
+- The snapshot exposes `transition_until` and `transition_remaining_seconds`;
+  the countdown auto-advances and a reopened tab with an overdue deadline
+  self-recovers (no background timers, D47).
+- Host `skip`/`finish` skip the cooldown and go straight to the countdown (D20);
+  `start` cancels a pending transition; `pause` cancels it too (E22).
+- Covered by `backend/tests/test_playback.py` (8 transition tests) and the live
+  smoke above.
 
 ## Branch / commit workflow
 

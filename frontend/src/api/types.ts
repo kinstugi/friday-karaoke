@@ -76,6 +76,8 @@ export interface QueueSnapshot {
   status: SessionStatus
   round_number: number
   playback_state: PlaybackState
+  transition_until: string | null
+  transition_remaining_seconds: number | null
   queue: QueueEntry[]
 }
 

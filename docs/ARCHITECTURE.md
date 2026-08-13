@@ -101,9 +101,11 @@ Implementation status at M6:
   `YouTubeService` (M6: Data API v3 metadata fetch, URL validation, duration
   parsing), `QueueService` (M7/M10.1: round-robin engine — round assignment,
   derived active round, stable ordering, per-participant cap, snapshots with
-  computed positions, cancel/remove, host URL editing), `PlaybackService` (M11:
-  host-driven start/skip/finish with NEXT promotion and automatic round
-  crossing).
+  computed positions, cancel/remove, host URL editing), `PlaybackService` (M11/
+  M13: host-driven start/skip/finish and automatic transitions — `play/end`
+  begins COOLDOWN → COUNTDOWN → auto-start, host skip/finish skip the cooldown;
+  playback state is stored on the session with authoritative transition
+  deadlines, D47).
 - **API:** health at root; host auth under `/api/v1/auth/host` (M3); sessions
   under `/api/v1/sessions` (create/get/**list (M9)**/start/end + SVG QR, M4/M5); public join
   under `/api/v1/join` (M5); song endpoints under `/api/v1/sessions/{id}/entries`
@@ -262,7 +264,13 @@ get correct state from the API.
   `SINGING` entry's video on the host device (D4), reports completion back via
   the M11 `finish` endpoint, and surfaces player errors (E5/E24). The IFrame API
   loads at runtime; `src/youtube.d.ts` types the YT surface.
-- **M13–M16** — automation + round lifecycle cleanup + notifications.
+- **M13** — automatic song transitions (complete): sessions store the playback
+  state + authoritative `transition_until` deadline + per-session timings
+  (defaults 10/20, migration `0006`, D47). `play/end` → COOLDOWN → COUNTDOWN →
+  auto-start via the idempotent `play/advance` (no background timers; the
+  dashboard counts down and advances); skip/finish skip the cooldown (D20);
+  pause cancels a pending transition.
+- **M14–M16** — moderation polish + round summaries + notifications.
 - **M17–M19** — security, testing, PWA/mobile UX.
 - **M20–M22** — deployment, pilot, fixes.
 

@@ -1,28 +1,37 @@
-"""Playback use-cases (M11).
+"""Playback use-cases (M11; automatic transitions at M13).
 
-The playback state machine is host-driven for now (M12 embeds the host player,
-M13 adds timer-driven automatic transitions). M11 gives the host the controls to
-drive the queue's playback lifecycle:
+The playback state machine is host-driven (M11) and, since M13, **automatically
+advances** between songs using per-session timing configuration (PRODUCT_SPEC
+§10): when a song ends (``end``) the backend enters ``COOLDOWN``, then
+``COUNTDOWN``, then auto-promotes the next entry to ``SINGING`` (``PLAYING``).
+Host ``skip``/``finish`` skip the cooldown and go straight to the countdown
+(D20: advance immediately — no post-song rest after a host intervention).
 
-- ``start``  promotes the front of the active queue to ``SINGING``
-- ``skip``   marks the current ``SINGING`` entry ``SKIPPED`` and advances
-- ``finish`` marks the current ``SINGING`` entry ``COMPLETED`` and advances
+Timing is backend-authoritative (D2): the session stores ``playback_state`` and
+the absolute ``transition_until`` deadline (decision D47). The frontend renders
+the remaining time from the snapshot and calls ``advance`` when a phase's
+deadline passes — the endpoint advances idempotently, so a disconnected/reopened
+dashboard simply sees an overdue deadline and calls ``advance`` again. There are
+no background timers, so nothing drifts or leaks across restarts.
 
-Advancing promotes the next non-terminal entry of the current round to ``NEXT``
-and, because the active round is derived (M10.1/D43), automatically crosses into
-the next round when the current one is exhausted. Playback state itself is
-*derived* (``PLAYING`` iff something is ``SINGING``, decision D46) — it is never
-stored, so it cannot drift from the queue.
+``playback_state`` is stored because the transition states cannot be derived
+from entry statuses alone (this supersedes M11/D46's derived state). The service
+keeps the stored state and the entry statuses consistent:
+- ``PLAYING``  <-> an entry is ``SINGING``
+- ``COOLDOWN``/``COUNTDOWN`` -> the front of the active queue is ``NEXT``
+- ``IDLE``     -> nothing is singing and no transition is pending
 
-Pause/resume are session-state transitions (``ACTIVE <-> PAUSED``) and live in
-``SessionService`` (M11 exposes them under the ``/play`` routes).
+Pause/resume are session transitions (``ACTIVE <-> PAUSED``) in
+``SessionService``; pausing cancels any pending transition (the host controls
+the next start manually after resume, E22).
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.playback import PlaybackState, ensure_utc
 from app.domain.queue_entry import QueueEntryStatus
 from app.domain.session import SessionStatus
 from app.models.queue_entry import QueueEntry
@@ -47,18 +56,27 @@ class NothingPlayingError(Exception):
     """Raised when skipping/finishing with no ``SINGING`` entry."""
 
 
+class TransitionNotReadyError(Exception):
+    """Raised when advancing a transition before its deadline passes."""
+
+
+class NoTransitionError(Exception):
+    """Raised when advancing while no transition is in progress."""
+
+
 class PlaybackService:
-    """Application service for host-driven playback (M11)."""
+    """Application service for playback (M11) and automatic transitions (M13)."""
 
     async def start(
         self, session: AsyncSession, host_id: uuid.UUID, session_id: uuid.UUID
     ) -> QueueEntry:
-        """Promote the front of the active queue to ``SINGING``.
+        """Manually start the front of the active queue (→ ``SINGING``).
 
-        Raises ``NothingToPlayError`` (empty queue), ``AlreadyPlayingError``
-        (already singing), or ``SessionEndedError``.
+        Cancels any pending automatic transition (the host overrides automation,
+        B9). Raises ``NothingToPlayError``, ``AlreadyPlayingError``, or
+        ``SessionEndedError``.
         """
-        await self._require_playable(session, host_id, session_id)
+        karaoke = await self._require_playable(session, host_id, session_id)
         active = await queue_service.get_active_entries(session, session_id)
         if not active:
             raise NothingToPlayError("the queue is empty")
@@ -67,22 +85,110 @@ class PlaybackService:
             raise AlreadyPlayingError("a song is already playing")
         current.status = QueueEntryStatus.SINGING
         current.started_at = datetime.now(timezone.utc)
+        karaoke.playback_state = PlaybackState.PLAYING
+        karaoke.transition_until = None
+        await session.commit()
+        return current
+
+    async def end(
+        self, session: AsyncSession, host_id: uuid.UUID, session_id: uuid.UUID
+    ) -> QueueEntry:
+        """The host device reports the current video ended naturally (M13).
+
+        Marks the entry ``COMPLETED``, promotes the next to ``NEXT``, and begins
+        the automatic transition with the post-song cooldown.
+        """
+        karaoke = await self._require_playable(session, host_id, session_id)
+        current = await self._current_singer(session, session_id)
+        if current is None:
+            raise NothingPlayingError("no song is currently playing")
+        current.status = QueueEntryStatus.COMPLETED
+        current.ended_at = datetime.now(timezone.utc)
+        await session.commit()
+        await self._promote_next(session, session_id)
+        await self._begin_transition(session, karaoke, skip_cooldown=False)
         await session.commit()
         return current
 
     async def skip(
         self, session: AsyncSession, host_id: uuid.UUID, session_id: uuid.UUID
     ) -> QueueEntry:
-        """Mark the current singer ``SKIPPED`` and advance immediately (D20)."""
-        return await self._advance(session, host_id, session_id, QueueEntryStatus.SKIPPED)
+        """Skip the current singer (``SKIPPED``) and begin the countdown (D20/M13)."""
+        return await self._advance(
+            session, host_id, session_id, QueueEntryStatus.SKIPPED
+        )
 
     async def finish(
         self, session: AsyncSession, host_id: uuid.UUID, session_id: uuid.UUID
     ) -> QueueEntry:
-        """Mark the current singer ``COMPLETED`` and advance immediately (D20)."""
+        """Finish the current singer (``COMPLETED``) and begin the countdown (D20/M13)."""
         return await self._advance(
             session, host_id, session_id, QueueEntryStatus.COMPLETED
         )
+
+    async def advance(
+        self, session: AsyncSession, host_id: uuid.UUID, session_id: uuid.UUID
+    ) -> QueueEntry | None:
+        """Progress an automatic transition whose phase deadline has passed.
+
+        ``COOLDOWN`` -> ``COUNTDOWN`` (returns None), then ``COUNTDOWN`` ->
+        ``PLAYING`` (auto-promotes the ``NEXT`` entry to ``SINGING`` and returns
+        it). Idempotent: calling advance again after the transition finished
+        raises ``NoTransitionError``; calling it before a deadline raises
+        ``TransitionNotReadyError``. The host dashboard calls this when its
+        local countdown reaches zero, so a reopened tab self-recovers.
+        """
+        karaoke = await self._require_playable(session, host_id, session_id)
+        now_ = datetime.now(timezone.utc)
+        if karaoke.playback_state is PlaybackState.COOLDOWN:
+            if (
+                karaoke.transition_until is not None
+                and now_ < ensure_utc(karaoke.transition_until)
+            ):
+                raise TransitionNotReadyError("cooldown is still running")
+            karaoke.playback_state = PlaybackState.COUNTDOWN
+            karaoke.transition_until = now_ + timedelta(
+                seconds=karaoke.countdown_seconds
+            )
+            await session.commit()
+            return None
+        if karaoke.playback_state is PlaybackState.COUNTDOWN:
+            if (
+                karaoke.transition_until is not None
+                and now_ < ensure_utc(karaoke.transition_until)
+            ):
+                raise TransitionNotReadyError("countdown is still running")
+            entry = await self._start_front(session, karaoke)
+            # If the queue emptied mid-countdown (the host removed the NEXT
+            # entry), there is nothing to start: return to IDLE rather than
+            # claiming PLAYING with no singer (D47 invariant).
+            karaoke.playback_state = (
+                PlaybackState.PLAYING if entry is not None else PlaybackState.IDLE
+            )
+            karaoke.transition_until = None
+            await session.commit()
+            return entry
+        raise NoTransitionError("no automatic transition in progress")
+
+    async def pause(
+        self, session: AsyncSession, host_id: uuid.UUID, session_id: uuid.UUID
+    ) -> Session:
+        """Pause automatic progression (``ACTIVE -> PAUSED``) and cancel any
+        pending transition (E22: the host starts the next song manually)."""
+        karaoke = await session_service.pause(session, host_id, session_id)
+        if karaoke.playback_state in PlaybackState.transition_states():
+            karaoke.playback_state = PlaybackState.IDLE
+            karaoke.transition_until = None
+            await session.commit()
+        return karaoke
+
+    async def resume(
+        self, session: AsyncSession, host_id: uuid.UUID, session_id: uuid.UUID
+    ) -> Session:
+        """Resume progression (``PAUSED -> ACTIVE``, M11/M13)."""
+        return await session_service.resume(session, host_id, session_id)
+
+    # --- internals -------------------------------------------------------------
 
     async def _advance(
         self,
@@ -91,17 +197,61 @@ class PlaybackService:
         session_id: uuid.UUID,
         terminal: QueueEntryStatus,
     ) -> QueueEntry:
-        await self._require_playable(session, host_id, session_id)
-        active = await queue_service.get_active_entries(session, session_id)
-        current = next(
-            (e for e in active if e.status is QueueEntryStatus.SINGING), None
-        )
+        """Mark the current singer terminal and begin the countdown transition.
+
+        Host interventions (skip/finish) skip the post-song cooldown: the singer
+        is done, keep momentum, but the next singer still gets their countdown.
+        """
+        karaoke = await self._require_playable(session, host_id, session_id)
+        current = await self._current_singer(session, session_id)
         if current is None:
             raise NothingPlayingError("no song is currently playing")
         current.status = terminal
         current.ended_at = datetime.now(timezone.utc)
         await session.commit()
         await self._promote_next(session, session_id)
+        await self._begin_transition(session, karaoke, skip_cooldown=True)
+        await session.commit()
+        return current
+
+    async def _begin_transition(
+        self,
+        session: AsyncSession,
+        karaoke: Session,
+        skip_cooldown: bool,
+    ) -> None:
+        """Set the playback state for the next phase of the transition.
+
+        When no entry remains (the queue is exhausted), the transition is a
+        no-op: playback returns to ``IDLE``.
+        """
+        active = await queue_service.get_active_entries(session, karaoke.id)
+        if not active:
+            karaoke.playback_state = PlaybackState.IDLE
+            karaoke.transition_until = None
+            return
+        now_ = datetime.now(timezone.utc)
+        if skip_cooldown or karaoke.cooldown_seconds == 0:
+            karaoke.playback_state = PlaybackState.COUNTDOWN
+            karaoke.transition_until = now_ + timedelta(
+                seconds=karaoke.countdown_seconds
+            )
+        else:
+            karaoke.playback_state = PlaybackState.COOLDOWN
+            karaoke.transition_until = now_ + timedelta(
+                seconds=karaoke.cooldown_seconds
+            )
+
+    async def _start_front(
+        self, session: AsyncSession, karaoke: Session
+    ) -> QueueEntry | None:
+        """Promote the front of the active queue to ``SINGING`` (auto-start)."""
+        active = await queue_service.get_active_entries(session, karaoke.id)
+        if not active:
+            return None
+        current = active[0]
+        current.status = QueueEntryStatus.SINGING
+        current.started_at = datetime.now(timezone.utc)
         return current
 
     async def _promote_next(
@@ -116,6 +266,14 @@ class PlaybackService:
         if remaining:
             remaining[0].status = QueueEntryStatus.NEXT
             await session.commit()
+
+    async def _current_singer(
+        self, session: AsyncSession, session_id: uuid.UUID
+    ) -> QueueEntry | None:
+        active = await queue_service.get_active_entries(session, session_id)
+        return next(
+            (e for e in active if e.status is QueueEntryStatus.SINGING), None
+        )
 
     async def _require_playable(
         self, session: AsyncSession, host_id: uuid.UUID, session_id: uuid.UUID

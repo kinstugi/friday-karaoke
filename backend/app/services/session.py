@@ -14,10 +14,11 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
+from app.domain.playback import PlaybackState
 from app.domain.session import SessionStatus
 from app.models.round import Round
 from app.models.session import Session
-
 #: Join-code alphabet: uppercase and unambiguous (no 0/O, 1/I).
 _JOIN_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 _JOIN_CODE_LENGTH = 6
@@ -74,14 +75,35 @@ class SessionService:
     """Application service for host-owned karaoke sessions."""
 
     async def create(
-        self, session: AsyncSession, host_id: uuid.UUID, name: str | None
+        self,
+        session: AsyncSession,
+        host_id: uuid.UUID,
+        name: str | None,
+        cooldown_seconds: int | None = None,
+        countdown_seconds: int | None = None,
     ) -> Session:
-        """Create a session in ``CREATED`` state with round 1, and return it."""
+        """Create a session in ``CREATED`` state with round 1, and return it.
+
+        ``cooldown_seconds``/``countdown_seconds`` default from settings
+        (M13, PRODUCT_SPEC §10).
+        """
+        settings = get_settings()
         karaoke = Session(
             host_id=host_id,
             name=_normalize_session_name(name),
             join_code=await _generate_join_code(session),
             status=SessionStatus.CREATED,
+            playback_state=PlaybackState.IDLE,
+            cooldown_seconds=(
+                cooldown_seconds
+                if cooldown_seconds is not None
+                else settings.post_song_cooldown_seconds
+            ),
+            countdown_seconds=(
+                countdown_seconds
+                if countdown_seconds is not None
+                else settings.next_singer_countdown_seconds
+            ),
         )
         session.add(karaoke)
         await session.flush()  # populate karaoke.id for the round FK

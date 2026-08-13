@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from app.core.config import get_settings
-from app.domain.playback import PlaybackState
+from app.domain.playback import ensure_utc
 from app.domain.queue_entry import QueueEntryStatus
 from app.models.participant import Participant
 from app.models.queue_entry import QueueEntry
@@ -203,19 +203,30 @@ class QueueService:
     async def snapshot(
         self, session: AsyncSession, session_id: uuid.UUID
     ) -> QueueSnapshotResponse:
-        """Return the authoritative queue snapshot (REST + realtime, M11).
+        """Return the authoritative queue snapshot (REST + realtime, M11/M13).
 
-        ``playback_state`` is derived: ``PLAYING`` while an entry is ``SINGING``,
-        otherwise ``IDLE`` (decision D46 — playback state is never stored).
+        ``playback_state`` is the stored state (M13, decision D47);
+        ``transition_remaining_seconds`` is computed from the authoritative
+        transition deadline for countdown display.
         """
         karaoke = await session_service.get_by_id(session, session_id)
         active = await self.get_active_entries(session, session_id)
-        playing = any(e.status is QueueEntryStatus.SINGING for e in active)
+        remaining: float | None = None
+        if karaoke.transition_until is not None:
+            remaining = max(
+                0.0,
+                (
+                    ensure_utc(karaoke.transition_until)
+                    - datetime.now(timezone.utc)
+                ).total_seconds(),
+            )
         return QueueSnapshotResponse(
             session_id=karaoke.id,
             status=karaoke.status,
             round_number=await self.get_current_round_number(session, session_id),
-            playback_state=PlaybackState.PLAYING if playing else PlaybackState.IDLE,
+            playback_state=karaoke.playback_state,
+            transition_until=karaoke.transition_until,
+            transition_remaining_seconds=remaining,
             queue=[
                 self.entry_response(entry, index)
                 for index, entry in enumerate(active, start=1)

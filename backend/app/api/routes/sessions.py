@@ -51,6 +51,9 @@ def _session_to_response(session: Session) -> SessionResponse:
         join_code=session.join_code,
         join_url=_join_url(session.join_code),
         status=session.status,
+        playback_state=session.playback_state,
+        cooldown_seconds=session.cooldown_seconds,
+        countdown_seconds=session.countdown_seconds,
         created_at=session.created_at,
         started_at=session.started_at,
         ended_at=session.ended_at,
@@ -64,7 +67,13 @@ async def create_session(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> SessionResponse:
     """Create a karaoke session owned by the authenticated host."""
-    karaoke = await session_service.create(session, current_host.id, payload.name)
+    karaoke = await session_service.create(
+        session,
+        current_host.id,
+        payload.name,
+        cooldown_seconds=payload.cooldown_seconds,
+        countdown_seconds=payload.countdown_seconds,
+    )
     return _session_to_response(karaoke)
 
 

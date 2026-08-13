@@ -171,11 +171,22 @@ song cap, sessions not tied to a browser) are in `docs/PRODUCT_SPEC.md` §8–§
 
 ## 8. Current milestone
 
-**M13 — Automatic song transitions** (next; backend + frontend). M12 is
+**M14 — Host moderation + manual controls** (next; backend + frontend). M13 is
 complete; see `docs/DEV_BRAIN.md` for live status.
 
 ## 9. Completed milestones
 
+- **M13 — Automatic song transitions** (complete, backend + frontend): sessions
+  gain stored playback state + authoritative transition deadlines
+  (`playback_state`, `transition_until`, per-session `cooldown_seconds`/
+  `countdown_seconds`, defaults 10/20, D47; migration `0006`). Songs advance
+  automatically: natural end → `play/end` → COOLDOWN → COUNTDOWN → auto-start
+  (`play/advance`, idempotent, no background timers); host skip/finish skip the
+  cooldown (D20). The host dashboard counts down and calls advance; a reopened
+  tab   self-recovers. `COOLDOWN`/`COUNTDOWN` are now reachable (D46 superseded by
+  D47; `PREPARING` remains a documented enum value — the player pre-loads during
+  the countdown). 8 new tests (suite 207); pyright 0; live smoke verified
+  the full transition cycle against Postgres + real YouTube.
 - **M12 — YouTube host player** (complete, frontend): the host dashboard embeds
   the YouTube IFrame player (host browser is the playback device, D4). A new
   `YouTubePlayer` component loads the `SINGING` entry's video from the snapshot,
@@ -303,11 +314,9 @@ complete; see `docs/DEV_BRAIN.md` for live status.
 
 ## 10. Known limitations
 
-- The host dashboard plays songs through the embedded YouTube player (M12), but
-  transitions are still **manual** (the host clicks "Start next song" after each
-  song): the timer-driven cooldown/countdown automation and the "you're next"
-  notifications land in M13/M15. The `PREPARING`/`COUNTDOWN`/`COOLDOWN` playback
-  states exist in the enum but are not yet reachable (D46).
+- Song transitions are automatic (M13) but there are no **notifications** yet:
+  the next singer isn't pushed a "you're next" alert beyond the on-screen
+  countdown (M15). Round/session summaries land in M16.
 - YouTube playback is only exercisable in a real browser (autoplay policies,
   audio output); automated checks cover the build and the backend contract.
 - Realtime (M10) delivers only the events whose producers exist: `QueueUpdated`
@@ -390,6 +399,12 @@ See `docs/DECISIONS.md` for the full, maintained list. Highlights:
   `SINGING`, never stored) and host-driven via `/play/start|skip|finish|pause|
   resume`; advancing crosses round boundaries automatically; the full
   `PlaybackState` lifecycle (PREPARING/COUNTDOWN/COOLDOWN) waits for M13 (D46).
+- Automatic transitions (M13): the playback state is now **stored** with
+  authoritative transition deadlines (`transition_until`) and per-session
+  timings (defaults 10/20); songs auto-advance COOLDOWN → COUNTDOWN → auto-start
+  with no background timers — the dashboard counts down and calls the idempotent
+  `play/advance`; host skip/finish skip the cooldown (D20, D46 superseded by
+  D47).
 - No user-visible feature in M0 beyond a health check.
 
 ## 12. Commands for running / testing

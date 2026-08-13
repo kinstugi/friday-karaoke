@@ -45,6 +45,13 @@ class Settings(BaseSettings):
     #: Maximum songs a participant may queue total, across all rounds (M10.1,
     #: decision D45). Submissions beyond this are rejected.
     queue_max_songs_per_participant: int = 5
+    #: Default post-song cooldown in seconds (M13, PRODUCT_SPEC §10). Applied
+    #: after a song ends naturally before the next-singer countdown starts.
+    #: Per-session override: ``cooldown_seconds`` on session creation.
+    post_song_cooldown_seconds: int = 10
+    #: Default next-singer countdown in seconds (M13, PRODUCT_SPEC §10).
+    #: Per-session override: ``countdown_seconds`` on session creation.
+    next_singer_countdown_seconds: int = 20
 
 
 @lru_cache

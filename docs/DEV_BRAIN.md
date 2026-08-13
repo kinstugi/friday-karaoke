@@ -7,80 +7,108 @@ of every milestone. The persistent context lives in `PROJECT_BRAIN.md`.
 
 ## Current milestone
 
-**M12 — YouTube host player** — COMPLETE (verified).
+**M13 — Automatic song transitions** — COMPLETE (verified).
 
 ## Current task
 
-None (milestone finished). Next milestone: **M13 — Automatic song transitions**
-(timer-driven cooldown/countdown between songs using the M11 playback engine).
+None (milestone finished). Next milestone: **M14 — Host moderation + manual
+controls** (skip/finish/pause/resume polish and the remaining host intervention
+paths; much of it already landed with M11/M13).
 
-## M12 scope (plan.md §M12)
+## M13 scope (plan.md §M13)
 
-- Embed the YouTube player into the host dashboard — the **host browser is the
-  playback device** (D4); participants never play audio.
-- Drive the player from the M11 playback state (the `SINGING` entry's video).
-- Detect playback completion (report back via the M11 `finish` endpoint).
-- Handle player errors (E5/E24) and browser-autoplay restrictions.
+- Automatic advancement between songs, configurable **per session**
+  (PRODUCT_SPEC §10): after a song ends naturally (`play/end`), the backend runs
+  `COOLDOWN → COUNTDOWN → auto-start`; host `skip`/`finish` skip the cooldown
+  and go straight to the countdown (D20). The host can always override.
 
-## Verification results (M12 acceptance criteria, plan.md §M12)
+## Verification results (M13 acceptance criteria, plan.md §M13)
 
 | Acceptance criterion | Result |
 | -------------------- | ------ |
-| Host can start a queued song and play it through the host machine's speakers | Verified — the dashboard's "Start next song" (M11) marks the entry `SINGING`; the embedded `YouTubePlayer` loads and plays that entry's `video_id` on the host device; playback completion calls `finish` and advances |
-| Participants do not play the song | Verified — the player is mounted only on the host dashboard; participant screens carry no player (D4) |
-| Handle player errors | Verified — `onError` maps YouTube error codes to host-facing messages surfaced in the Playback card; the host can Skip (→ `SKIPPED`) or Edit the URL (E5/E24) |
-| Handle autoplay restrictions | Verified — playback is attempted on load after the host's click gesture; if blocked, the embedded player's native controls remain usable (E24), and a "No song is playing" placeholder is shown when idle |
+| Automatic advancement is configurable per session | Verified — `cooldown_seconds`/`countdown_seconds` on session creation (defaults 10/20 from settings); `test_transition_timings_are_per_session_and_instant_path`; live smoke with 1s/1s timings |
+| Song ends → cooldown → next-singer preparation → countdown → next song | Verified — `test_advance_moves_cooldown_then_countdown_then_auto_start` (frozen clock); live smoke showed COOLDOWN (0.98s remaining) → COUNTDOWN → PLAYING auto-start of the next singer |
+| Host can always skip / finish / pause / manually start | Verified — `skip`/`finish` begin the countdown (skipping the cooldown, D20); `test_manual_start_cancels_pending_transition`; `test_pause_cancels_pending_transition`; manual start cancels the transition (B9) |
 
 Additional verification:
 
-- Backend unchanged (M12 is frontend-only; the M11 `/play` endpoints already
-  exist): suite remains **199 passed**, `pyright` 0 errors.
+- Backend suite: **207 passed** (199 prior + 8 new transition tests), `pyright`
+  0 errors.
 - Frontend: `npm run typecheck`, `npm run lint`, `npm run build` all pass.
-- Live check against the running backend: submit → snapshot's `SINGING` entry
-  carries the `video_id` the player consumes; `playback_state` `PLAYING`;
-  round 1. (Actual audio playback requires a real browser/speakers — the
-  school-night environment.)
-- No new dependencies: the YouTube IFrame API is loaded at runtime from
-  `https://www.youtube.com/iframe_api`, and the YT API surface is typed by a
-  small ambient `src/youtube.d.ts` (no `@types/youtube` package).
+- Migration `0006_playback_transitions` applied to live PostgreSQL (no drift);
+  `alembic current` at head.
+- Live smoke against real PostgreSQL + real YouTube metadata: per-session 1s/1s
+  timings; start → PLAYING; end → COOLDOWN (remaining ~0.98s); advance before
+  the deadline → 409; advance → COUNTDOWN; advance → PLAYING (next singer
+  auto-started); realtime delivered `SingerStarted` + `QueueUpdated` on start and
+  `SingerFinished` + `QueueUpdated` on end.
 
-## Files changed (M12)
+## Files changed (M13)
 
 ```text
-frontend/src/youtube.d.ts                        (new — ambient YouTube IFrame API types)
-frontend/src/features/host/YouTubePlayer.tsx     (new — embedded player: load API, play SINGING
-                                                  video, ended/error events, placeholder)
-frontend/src/features/host/HostDashboardScreen.tsx (player in the Playback card, onEnded->finish,
-                                                  playerError surfacing, nowSingingRef guard,
-                                                  header comment updated)
-frontend/src/App.css                             (player 16:9 frame, placeholder, status)
-docs/PROJECT_BRAIN.md, docs/ARCHITECTURE.md, docs/DEV_BRAIN.md, docs/RUNBOOK.md
+backend/alembic/versions/0006_playback_transitions.py  (new — sessions.playback_state,
+                                       transition_until, cooldown_seconds, countdown_seconds)
+backend/app/core/config.py            (post_song_cooldown_seconds=10, next_singer_countdown_seconds=20)
+backend/.env.example                  (+ the two settings)
+backend/app/models/session.py         (the four new columns)
+backend/app/schemas/session.py        (create request + response carry the timings/state)
+backend/app/services/session.py       (create persists per-session timings)
+backend/app/domain/playback.py        (transition_states + ensure_utc helper; stored-state doc)
+backend/app/services/playback.py      (end/advance + transitions; stored state; start cancels;
+                                       pause cancels; finish/skip begin the countdown)
+backend/app/services/queue.py         (snapshot reads stored state + transition deadline/remaining)
+backend/app/schemas/queue.py          (QueueSnapshotResponse + transition_until/
+                                       transition_remaining_seconds)
+backend/app/api/routes/playback.py    (+ /play/end, /play/advance; pause/resume broadcast
+                                       QueueUpdated too)
+backend/app/api/routes/sessions.py    (create passes timings; response maps the new fields)
+backend/tests/test_playback.py        (updated finish/skip semantics + 8 new transition tests)
+frontend/src/api/types.ts             (QueueSnapshot.transition_until/transition_remaining_seconds)
+frontend/src/api/host.ts              (endPlayback, advancePlayback)
+frontend/src/lib/transition.ts        (new — useTransitionRemaining hook)
+frontend/src/features/host/HostDashboardScreen.tsx (player onEnded -> play/end; countdown + auto-advance;
+                                       advance 409 tolerated; transition note in Playback card)
+frontend/src/features/queue/QueueScreen.tsx (next-singer countdown on the Up next card)
+frontend/src/App.css                  (.transition-note)
+docs/PROJECT_BRAIN.md, docs/ARCHITECTURE.md, docs/DECISIONS.md (D46 superseded, D47), docs/DEV_BRAIN.md,
+docs/API_CONTRACT.md, docs/RUNBOOK.md, docs/PRODUCT_SPEC.md (§10 note)
 ```
 
-## Implementation notes (M12)
+## Implementation notes (M13)
 
-- **Player component (`YouTubePlayer`):** loads the IFrame API script once
-  (module-level promise), creates one `YT.Player` bound to an always-mounted
-  container, and drives it from a `videoId` prop (the `SINGING` entry's id).
-  On a new video id it calls `loadVideoById` + `playVideo`; on `null` it calls
-  `stopVideo` and shows a "No song is playing" placeholder. `onStateChange`
-  `ENDED` → `onEnded` (→ the dashboard's `finish`); `onError` maps YouTube error
-  codes (2/5/100/101/150) to host-facing messages.
-- **Autoplay policy (E24):** the host's click on "Start next song" establishes
-  user activation, so the subsequent `loadVideoById`/`playVideo` generally
-  autoplays. If a browser blocks it, the embedded player's native controls still
-  work (the host clicks play), and `ENDED` is still reported.
-- **Backend remains authoritative (D2):** the player never decides state — it
-  renders the `SINGING` entry from the snapshot (via the realtime channel) and
-  reports completion back through the M11 `finish` endpoint. A `nowSingingRef`
-  guard prevents finishing an entry that was already skipped/removed.
-- **No scope creep:** no backend changes, no automatic transitions (M13), no
-  notifications (M15), no new npm dependency.
+- **Stored state (D47):** `sessions.playback_state` is now authoritative
+  (supersedes M11/D46's derivation — the transition phases have no `SINGING`
+  entry). The service keeps state and entry statuses consistent
+  (`PLAYING` ⇔ `SINGING`; `COOLDOWN`/`COUNTDOWN` ⇔ front is `NEXT`; `IDLE` ⇔
+  nothing). `play/end` marks `COMPLETED` and starts `COOLDOWN`; `skip`/`finish`
+  mark `SKIPPED`/`COMPLETED` and start `COUNTDOWN` (skip the cooldown, D20);
+  `play/advance` progresses a phase whose deadline passed (`COOLDOWN`→`COUNTDOWN`,
+  then auto-promote `NEXT`→`SINGING`). `play/start` cancels a pending transition
+  (host override, B9); `play/pause` cancels it too (E22).
+- **Authoritative deadlines, no background timers (D47):** the snapshot carries
+  `transition_until` + `transition_remaining_seconds`; the dashboard counts down
+  via `useTransitionRemaining` and calls `play/advance` at zero (a stale 409 from
+  another tab or a just-advanced state is tolerated silently). A reopened tab
+  with an overdue deadline self-recovers on the next read.
+- **Per-session config:** `SessionCreateRequest` accepts `cooldown_seconds`/
+  `countdown_seconds` (defaults from settings); `SessionResponse` exposes them.
+- **Migration:** `0006_playback_transitions` adds four columns with server
+  defaults; existing sessions read `IDLE`/10/20 with no transition pending.
+- **Timezone portability (D22):** SQLite reads `DateTime(timezone=True)` back
+  naive; `ensure_utc` normalizes before comparisons/subtractions so tests and
+  PostgreSQL agree.
+- **No scope creep:** no notifications (M15), no round summaries (M16), no
+  new dependencies.
 
-## Tests added (M12)
+## Tests added (M13)
 
-- None (frontend-only; verified by typecheck/lint/build + the live backend
-  check above). Backend suite unchanged at 199.
+- `tests/test_playback.py` (8 new): natural end begins COOLDOWN; advance moves
+  COOLDOWN → COUNTDOWN → auto-start (frozen clock, with 409s before each
+  deadline); advance with no transition → 409; manual start cancels the pending
+  transition; pause cancels it; end with no next returns IDLE; per-session
+  timings + the instant path (cooldown/countdown 0); realtime Singer events on
+  end and on auto-start. Existing finish/skip tests updated to the M13 countdown
+  semantics.
 
 ## Current blockers
 
@@ -95,15 +123,15 @@ docs/PROJECT_BRAIN.md, docs/ARCHITECTURE.md, docs/DEV_BRAIN.md, docs/RUNBOOK.md
   for an upstream fix.
 - `RealtimeHub` is in-process/per-worker (D42): a multi-worker deployment needs
   a shared hub (Redis) — tracked for M20 deployment.
-- YouTube playback is only exercisable in a real browser (autoplay policies,
-  audio output); CI/agents verify the build and the backend contract instead.
+- Client/server clock skew during a countdown could cause a transient 409 on
+  `play/advance`; the dashboard tolerates it and re-syncs from the snapshot
+  (negligible on NTP-synced school devices).
 
 ## Next recommended task
 
-**M13 — Automatic song transitions** (backend + frontend): timer-driven
-transitions between songs (post-song cooldown, next-singer countdown — configurable
-per session, default 10 s / 20 s per PRODUCT_SPEC §10) built on the M11 playback
-engine and the M12 player. When a video ends, the backend enters COOLDOWN, then
-promotes + starts the next `SINGING` entry automatically, with the host able to
-override at any time. This also makes the `PREPARING`/`COUNTDOWN`/`COOLDOWN`
-`PlaybackState` values reachable (D46).
+**M14 — Host moderation + manual controls**: with M11/M13 the primary controls
+(start/skip/finish/pause/resume) are already live; M14 covers the remaining host
+authority paths (PRODUCT_SPEC §5.5/§9): removing the current singer advances
+playback, editing a URL keeps the position (already true), and general polish of
+the moderation surface — then **M15** adds the "you're next" notifications on top
+of the M13 countdown (on NEXT and at countdown start).

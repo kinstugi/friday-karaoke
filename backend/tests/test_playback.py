@@ -1,12 +1,16 @@
-"""Tests for the M11 playback state machine.
+"""Tests for the M11 playback state machine and the M13 automatic transitions.
 
-Covers the host playback endpoints (start/skip/finish/pause/resume), the entry
-status lifecycle (WAITING -> SINGING -> COMPLETED/SKIPPED, with NEXT promotion),
-the derived ``playback_state`` in the snapshot, round auto-advance across
-playback, the realtime singer events, and authorization/ownership.
+Covers the host playback endpoints (start/end/skip/finish/advance/pause/
+resume), the entry status lifecycle (WAITING -> SINGING -> COMPLETED/SKIPPED,
+with NEXT promotion), the stored playback state + transition deadlines (M13,
+D47), round auto-advance, the realtime singer events, and authorization.
+
+The transition-clock tests use a frozen ``datetime`` in the playback service so
+deadlines can be advanced deterministically without sleeping.
 """
 
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
@@ -31,6 +35,20 @@ PASSWORD = "correct-horse-battery-staple"
 
 VIDEO_A_ID = "dQw4w9WgXcQ"
 VIDEO_B_ID = "9bZkp7q19f0"
+
+
+class _FrozenDatetime:
+    """Frozen ``datetime`` for the playback service clock (M13 tests)."""
+
+    _now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    @classmethod
+    def now(cls, tz=None):
+        return cls._now if tz is None else cls._now.astimezone(tz)
+
+    @classmethod
+    def advance(cls, seconds: int) -> None:
+        cls._now += timedelta(seconds=seconds)
 
 
 def _video(video_id: str, title: str) -> YouTubeVideoData:
@@ -200,7 +218,11 @@ def test_skip_marks_skipped_and_promotes_next(
     response = _play(client, session_body["id"], headers, "skip")
     assert response.status_code == 200, response.text
     body = response.json()
-    assert body["playback_state"] == "IDLE"
+    # M13: skip begins the automatic transition — the next singer's countdown
+    # (the post-song cooldown is skipped on host intervention, D20).
+    assert body["playback_state"] == "COUNTDOWN"
+    assert body["transition_remaining_seconds"] is not None
+    assert body["transition_remaining_seconds"] > 0
     statuses = [e["status"] for e in body["queue"]]
     assert statuses == ["NEXT"]
     assert body["queue"][0]["id"] != singing_id  # the next singer is now NEXT
@@ -222,7 +244,8 @@ def test_finish_marks_completed_and_promotes_next(
     response = _play(client, session_body["id"], headers, "finish")
     assert response.status_code == 200, response.text
     body = response.json()
-    assert body["playback_state"] == "IDLE"
+    # M13: finish begins the countdown transition (no cooldown on host action).
+    assert body["playback_state"] == "COUNTDOWN"
     assert [e["status"] for e in body["queue"]] == ["NEXT"]
     # The finished entry is terminal and dropped from the active queue.
     assert len(body["queue"]) == 1
@@ -353,4 +376,237 @@ def test_skip_broadcasts_singer_skipped(
         assert response.status_code == 200, response.text
         events = {ws.receive_json()["type"], ws.receive_json()["type"]}
         assert "SingerSkipped" in events
+        assert "QueueUpdated" in events
+
+
+# --- Automatic transitions (M13) ---------------------------------------------------
+
+
+def _setup_with_timings(
+    client: TestClient,
+    cooldown: int,
+    countdown: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[dict[str, str], dict, str]:
+    """Like ``_setup`` but with a frozen clock and per-session timings."""
+    monkeypatch.setattr("app.services.playback.datetime", _FrozenDatetime)
+    headers = _register(client)
+    created = client.post(
+        SESSIONS_URL,
+        json={"cooldown_seconds": cooldown, "countdown_seconds": countdown},
+        headers=headers,
+    )
+    assert created.status_code == 201, created.text
+    session_body = created.json()
+    joined = client.post(
+        f"{JOIN_URL}/{session_body['join_code']}/participants",
+        json={"nickname": "Alice"},
+    )
+    assert joined.status_code == 201, joined.text
+    return headers, session_body, joined.json()["token"]
+
+
+def test_end_begins_cooldown_transition(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_youtube(monkeypatch, {VIDEO_A_ID: _video(VIDEO_A_ID, "Song A")})
+    headers, session_body, alice = _setup_with_timings(client, 10, 20, monkeypatch)
+    bob = _join(client, session_body, "Bob")
+    _submit(client, session_body["id"], alice, VIDEO_A_ID)
+    _submit(client, session_body["id"], bob, VIDEO_A_ID)
+    _play(client, session_body["id"], headers, "start")
+
+    response = _play(client, session_body["id"], headers, "end")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["playback_state"] == "COOLDOWN"
+    assert body["transition_until"] is not None
+    assert body["transition_remaining_seconds"] is not None
+    # The finished entry is terminal; the next is promoted to NEXT.
+    assert [e["status"] for e in body["queue"]] == ["NEXT"]
+
+
+def test_advance_moves_cooldown_then_countdown_then_auto_start(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_youtube(monkeypatch, {VIDEO_A_ID: _video(VIDEO_A_ID, "Song A")})
+    headers, session_body, alice = _setup_with_timings(client, 10, 5, monkeypatch)
+    bob = _join(client, session_body, "Bob")
+    _submit(client, session_body["id"], alice, VIDEO_A_ID)
+    _submit(client, session_body["id"], bob, VIDEO_A_ID)
+    _play(client, session_body["id"], headers, "start")
+    _play(client, session_body["id"], headers, "end")
+
+    # Before the cooldown deadline: advance is rejected.
+    early = _play(client, session_body["id"], headers, "advance")
+    assert early.status_code == 409
+    assert "cooldown is still running" in early.json()["detail"]
+
+    # Past the cooldown deadline: COOLDOWN -> COUNTDOWN.
+    _FrozenDatetime.advance(11)
+    body = _play(client, session_body["id"], headers, "advance").json()
+    assert body["playback_state"] == "COUNTDOWN"
+
+    # Before the countdown deadline: rejected.
+    early2 = _play(client, session_body["id"], headers, "advance")
+    assert early2.status_code == 409
+    assert "countdown is still running" in early2.json()["detail"]
+
+    # Past the countdown deadline: the next entry auto-starts (PLAYING).
+    _FrozenDatetime.advance(6)
+    body = _play(client, session_body["id"], headers, "advance")
+    assert body.status_code == 200, body.text
+    json_body = body.json()
+    assert json_body["playback_state"] == "PLAYING"
+    assert json_body["transition_until"] is None
+    assert [e["status"] for e in json_body["queue"]] == ["SINGING"]
+    assert json_body["queue"][0]["participant_name"] == "Bob"
+
+
+def test_advance_with_no_transition_conflicts(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_youtube(monkeypatch, {VIDEO_A_ID: _video(VIDEO_A_ID, "Song A")})
+    headers, session_body, token = _setup_with_timings(client, 10, 20, monkeypatch)
+    _submit(client, session_body["id"], token, VIDEO_A_ID)
+    _play(client, session_body["id"], headers, "start")
+    response = _play(client, session_body["id"], headers, "advance")
+    assert response.status_code == 409
+    assert "no automatic transition" in response.json()["detail"]
+
+
+def test_manual_start_cancels_pending_transition(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_youtube(monkeypatch, {VIDEO_A_ID: _video(VIDEO_A_ID, "Song A")})
+    headers, session_body, alice = _setup_with_timings(client, 10, 20, monkeypatch)
+    bob = _join(client, session_body, "Bob")
+    _submit(client, session_body["id"], alice, VIDEO_A_ID)
+    _submit(client, session_body["id"], bob, VIDEO_A_ID)
+    _play(client, session_body["id"], headers, "start")
+    _play(client, session_body["id"], headers, "finish")  # -> COUNTDOWN
+
+    # The host manually starts the next song, cancelling the countdown.
+    body = _play(client, session_body["id"], headers, "start")
+    assert body.status_code == 200, body.text
+    json_body = body.json()
+    assert json_body["playback_state"] == "PLAYING"
+    assert json_body["transition_until"] is None
+    assert [e["status"] for e in json_body["queue"]] == ["SINGING"]
+
+
+def test_pause_cancels_pending_transition(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_youtube(monkeypatch, {VIDEO_A_ID: _video(VIDEO_A_ID, "Song A")})
+    headers, session_body, alice = _setup_with_timings(client, 10, 20, monkeypatch)
+    bob = _join(client, session_body, "Bob")
+    _submit(client, session_body["id"], alice, VIDEO_A_ID)
+    _submit(client, session_body["id"], bob, VIDEO_A_ID)
+    client.post(f"{SESSIONS_URL}/{session_body['id']}/start", headers=headers)
+    _play(client, session_body["id"], headers, "start")
+    _play(client, session_body["id"], headers, "end")  # -> COOLDOWN
+
+    paused = _play(client, session_body["id"], headers, "pause")
+    assert paused.status_code == 200, paused.text
+    json_body = paused.json()
+    assert json_body["status"] == "PAUSED"
+    assert json_body["playback_state"] == "IDLE"
+    assert json_body["transition_until"] is None
+    # The NEXT entry waits for a manual start after resume (E22).
+    assert [e["status"] for e in json_body["queue"]] == ["NEXT"]
+
+
+def test_end_with_no_next_returns_idle(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_youtube(monkeypatch, {VIDEO_A_ID: _video(VIDEO_A_ID, "Song A")})
+    headers, session_body, token = _setup_with_timings(client, 10, 20, monkeypatch)
+    _submit(client, session_body["id"], token, VIDEO_A_ID)
+    _play(client, session_body["id"], headers, "start")
+    body = _play(client, session_body["id"], headers, "end")
+    assert body.status_code == 200, body.text
+    json_body = body.json()
+    assert json_body["playback_state"] == "IDLE"
+    assert json_body["transition_until"] is None
+    assert json_body["queue"] == []
+
+
+def test_transition_timings_are_per_session_and_instant_path(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_youtube(monkeypatch, {VIDEO_A_ID: _video(VIDEO_A_ID, "Song A")})
+    headers, session_body, alice = _setup_with_timings(client, 0, 0, monkeypatch)
+    bob = _join(client, session_body, "Bob")
+    # The session response carries the per-session timings (PRODUCT_SPEC §10).
+    assert session_body["cooldown_seconds"] == 0
+    assert session_body["countdown_seconds"] == 0
+    _submit(client, session_body["id"], alice, VIDEO_A_ID)
+    _submit(client, session_body["id"], bob, VIDEO_A_ID)
+    _play(client, session_body["id"], headers, "start")
+
+    # With cooldown 0 the transition skips COOLDOWN and enters COUNTDOWN
+    # immediately; with countdown 0 advance auto-starts right away.
+    ended = _play(client, session_body["id"], headers, "end")
+    assert ended.status_code == 200, ended.text
+    assert ended.json()["playback_state"] == "COUNTDOWN"
+
+    started = _play(client, session_body["id"], headers, "advance")
+    assert started.status_code == 200, started.text
+    assert started.json()["playback_state"] == "PLAYING"
+    assert [e["status"] for e in started.json()["queue"]] == ["SINGING"]
+
+
+def test_advance_after_queue_emptied_returns_idle(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Removing the NEXT entry mid-countdown must not leave PLAYING without a
+    singer (D47 invariant)."""
+    _patch_youtube(monkeypatch, {VIDEO_A_ID: _video(VIDEO_A_ID, "Song A")})
+    headers, session_body, alice = _setup_with_timings(client, 0, 0, monkeypatch)
+    bob = _join(client, session_body, "Bob")
+    _submit(client, session_body["id"], alice, VIDEO_A_ID)
+    _submit(client, session_body["id"], bob, VIDEO_A_ID)
+    _play(client, session_body["id"], headers, "start")
+    finished = _play(client, session_body["id"], headers, "finish")  # -> COUNTDOWN
+    assert finished.status_code == 200, finished.text
+    next_id = finished.json()["queue"][0]["id"]
+
+    # The host removes the NEXT entry while the countdown is pending.
+    removed = client.delete(f"{ENTRIES_URL}/{next_id}", headers=headers)
+    assert removed.status_code == 204, removed.text
+
+    body = _play(client, session_body["id"], headers, "advance")
+    assert body.status_code == 200, body.text
+    json_body = body.json()
+    assert json_body["playback_state"] == "IDLE"
+    assert json_body["transition_until"] is None
+    assert json_body["queue"] == []
+
+
+def test_advance_broadcasts_singer_started_on_auto_start(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_youtube(monkeypatch, {VIDEO_A_ID: _video(VIDEO_A_ID, "Song A")})
+    headers, session_body, alice = _setup_with_timings(client, 0, 0, monkeypatch)
+    bob = _join(client, session_body, "Bob")
+    _submit(client, session_body["id"], alice, VIDEO_A_ID)
+    _submit(client, session_body["id"], bob, VIDEO_A_ID)
+    host_token = headers["Authorization"].split(" ", maxsplit=1)[1]
+
+    with client.websocket_connect(
+        WS_URL.format(session_id=session_body["id"]) + f"?token={host_token}"
+    ) as ws:
+        _play(client, session_body["id"], headers, "start")
+        # Consume start events (SingerStarted + QueueUpdated).
+        ws.receive_json()
+        ws.receive_json()
+        _play(client, session_body["id"], headers, "end")  # -> COUNTDOWN (cooldown 0)
+        events = {ws.receive_json()["type"], ws.receive_json()["type"]}
+        assert events == {"SingerFinished", "QueueUpdated"}
+
+        response = _play(client, session_body["id"], headers, "advance")
+        assert response.status_code == 200, response.text
+        events = {ws.receive_json()["type"], ws.receive_json()["type"]}
+        assert "SingerStarted" in events
         assert "QueueUpdated" in events

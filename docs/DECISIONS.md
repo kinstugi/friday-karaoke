@@ -693,7 +693,7 @@ These freeze MVP product behavior. They were captured in `docs/PRODUCT_SPEC.md`.
 
 ## D46. Playback state is derived, not stored; host-driven controls
 
-- **Status:** Accepted
+- **Status:** Superseded at M13 by D47
 - **Decision:** The session's playback state is **derived** from queue state —
   `PLAYING` while an entry is `SINGING`, otherwise `IDLE` — and surfaced in the
   queue snapshot (`playback_state`). It is never stored, so it cannot drift from
@@ -717,6 +717,41 @@ These freeze MVP product behavior. They were captured in `docs/PRODUCT_SPEC.md`.
 - **Rejected:** A stored `playback_state` column on sessions (drift risk, no
   benefit — the SINGING entry is the state); implementing PREPARING/COUNTDOWN/
   COOLDOWN timing in M11 (that is M13's automatic-transition scope).
+- **M13 note (D47):** the derived approach could not express the automatic
+  transition phases (nothing is `SINGING` during COOLDOWN/COUNTDOWN), so the
+  state is now stored together with authoritative transition deadlines.
+
+---
+
+## M13 automatic-transition decisions
+
+## D47. Stored playback state + authoritative transition deadlines (frontend-driven advance)
+
+- **Status:** Accepted (revision of D46)
+- **Decision:** M13 stores the playback state on the session (`playback_state`
+  column, default `IDLE`) together with the absolute `transition_until` deadline
+  of the current phase and per-session timings (`cooldown_seconds`,
+  `countdown_seconds`, defaults 10/20 from settings, PRODUCT_SPEC §10). The
+  automatic transition runs `COOLDOWN → COUNTDOWN → auto-start (PLAYING)` after a
+  song ends (`play/end`); host `skip`/`finish` skip the cooldown and go straight
+  to the countdown (D20). The frontend renders the remaining time from the
+  snapshot's `transition_until`/`transition_remaining_seconds` and calls the
+  idempotent `play/advance` endpoint when a phase deadline passes; a reopened tab
+  sees an overdue deadline and calls `advance` again, so recovery needs no
+  background timers.
+- **Rationale:** The M11/D46 derived state (`PLAYING` iff an entry is `SINGING`)
+  cannot express the transition phases (nothing is singing during the cooldown/
+  countdown), so the state must be stored. Keeping the *timing* authoritative in
+  the backend (D2) while letting the host dashboard trigger each phase avoids
+  fragile per-session background tasks: nothing drifts, nothing leaks across
+  restarts, and the clock can be frozen in tests for deterministic coverage. The
+  host device is the playback device (D4), so automation only needs to run while
+  the dashboard is open anyway.
+- **Rejected:** asyncio background tasks per session (restart-fragile, harder to
+  test, still need a stored deadline for recovery); client-owned timers with no
+  backend deadline (frontend would own authoritative timing, violating D2);
+  deriving the transition state from entry statuses (impossible — no entry is
+  singing during COOLDOWN/COUNTDOWN).
 
 ---
 

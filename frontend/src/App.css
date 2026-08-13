@@ -448,6 +448,10 @@ button.link-button {
   margin-top: 0.5rem;
 }
 
+.transition-note {
+  margin-top: 0.5rem;
+}
+
 /* --- Home (session list) ------------------------------------------------- */
 
 .home-list li {

@@ -53,12 +53,17 @@ class QueueSnapshotResponse(BaseModel):
 
     ``round_number`` is the active round (M10.1, D43): the round currently being
     sung, or the highest round that exists when the queue is empty.
-    ``playback_state`` is derived (M11, D46): ``PLAYING`` while an entry is
-    ``SINGING``, otherwise ``IDLE``.
+    ``playback_state`` is the stored playback state (M13, D47) — ``PLAYING``
+    while an entry is ``SINGING``, ``IDLE`` when idle, and ``COOLDOWN``/
+    ``COUNTDOWN`` during an automatic transition. ``transition_until`` is the
+    absolute deadline of the current transition phase (None otherwise) and
+    ``transition_remaining_seconds`` its remaining time for countdown display.
     """
 
     session_id: uuid.UUID
     status: SessionStatus
     round_number: int
     playback_state: PlaybackState
+    transition_until: datetime | None
+    transition_remaining_seconds: float | None
     queue: list[QueueEntryResponse]

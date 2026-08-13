@@ -74,7 +74,7 @@ export function startPlayback(
   })
 }
 
-/** Skip the current singer (SKIPPED) and advance (D20). */
+/** Skip the current singer (SKIPPED) and begin the countdown (D20/M13). */
 export function skipPlayback(
   token: string,
   sessionId: string,
@@ -85,12 +85,35 @@ export function skipPlayback(
   })
 }
 
-/** Finish the current singer (COMPLETED) and advance (D20). */
+/** The host player reports the current video ended naturally (M13): the entry
+ *  becomes COMPLETED and the cooldown → countdown → auto-start begins. */
+export function endPlayback(
+  token: string,
+  sessionId: string,
+): Promise<QueueSnapshot> {
+  return apiRequest<QueueSnapshot>(`${SESSIONS_BASE}/${sessionId}/play/end`, {
+    method: 'POST',
+    token,
+  })
+}
+
+/** Finish the current singer (COMPLETED) and begin the countdown (D20/M13). */
 export function finishPlayback(
   token: string,
   sessionId: string,
 ): Promise<QueueSnapshot> {
   return apiRequest<QueueSnapshot>(`${SESSIONS_BASE}/${sessionId}/play/finish`, {
+    method: 'POST',
+    token,
+  })
+}
+
+/** Progress an automatic transition whose phase deadline passed (M13). */
+export function advancePlayback(
+  token: string,
+  sessionId: string,
+): Promise<QueueSnapshot> {
+  return apiRequest<QueueSnapshot>(`${SESSIONS_BASE}/${sessionId}/play/advance`, {
     method: 'POST',
     token,
   })
