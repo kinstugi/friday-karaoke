@@ -72,9 +72,9 @@ Link-button = transparent, `--danger-text`, underlined.
 
 - **Cards**: `--surface` bg, `--border` border, `--radius-lg`, `--space-4` padding.
   Highlight card: `--primary` border (current singer).
-- **Badges** (session/status): pill, `--space-2`/`--space-3` padding, `--radius`
+- **Badges** (session/status/round): pill, `--space-2`/`--space-3` padding, `--radius`
   (999px), small uppercase bold, colored per status (created/paused muted,
-  active green, round_complete muted, ended red).
+  active green, ended red; `round` uses `--surface-3` with `--text`).
 - **Inputs**: `--surface-2` bg, `--border-strong` border, `--radius`, min-height
   48px. Must have a visible `:focus-visible` ring (`--focus`). Text inputs should
   have a visible label (`<label>`) or an aria-label.
