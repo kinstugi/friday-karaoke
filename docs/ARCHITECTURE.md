@@ -58,8 +58,9 @@ placeholders; `services/` gained its first real use-case at M3 — host auth;
 ```text
 backend/
     app/
-        api/          # HTTP + WebSocket endpoints/routers (health M2, auth M3, sessions M4, join M5, entries M6, realtime M10)
-        core/         # config (Pydantic Settings), structured logging, database, security
+        api/          # HTTP + WebSocket endpoints/routers (health M2, auth M3, sessions M4, join M5, entries M6, realtime M10, playback M11)
+        core/         # config (Pydantic Settings), structured logging, database, security,
+                      # rate limiting (M17, ratelimit.py)
         domain/       # domain models, enums, business rules, state machines (SessionStatus M4)
         services/     # use-cases (host auth M3, sessions M4, join M5, youtube M6, queue M7)
         repositories/ # persistence access (SQLAlchemy) (deferred until shared)
@@ -285,7 +286,11 @@ get correct state from the API.
   cleanup via `participants.last_connected_at` (join + realtime connect) with a
   lazy GC-on-render pass (D48, migration `0007`); snapshot `rounds_completed` +
   per-participant `remaining_songs`; host-only `GET /sessions/{id}/summary`.
-- **M17** — security + abuse protection.
+- **M17** — security + abuse protection (complete): in-process fixed-window
+  per-IP rate limits (`app/core/ratelimit.py`, D49) on join/preview/submit
+  (429), a YouTube metadata TTL cache protecting the Data API quota, and a
+  documented session-retention strategy.
+- **M18** — testing + failure scenarios.
 - **M17–M19** — security, testing, PWA/mobile UX.
 - **M20–M22** — deployment, pilot, fixes.
 

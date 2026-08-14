@@ -12,6 +12,7 @@ authority (D7).
 """
 
 import re
+import time
 from urllib.parse import parse_qs, urlparse
 
 import httpx
@@ -128,6 +129,14 @@ class YouTubeService:
         self._api_key = (
             api_key if api_key is not None else get_settings().youtube_api_key
         )
+        #: In-process metadata cache (M17): protects the Data API daily quota
+        #: from repeated previews/submissions of the same video. Keyed by video
+        #: id; entries expire after ``KARAOKE_YOUTUBE_CACHE_TTL_SECONDS``.
+        self._cache: dict[str, tuple[float, YouTubeVideoData]] = {}
+
+    def clear_cache(self) -> None:
+        """Drop all cached metadata (used by tests and admin tooling)."""
+        self._cache.clear()
 
     async def fetch_video_metadata(
         self, video_id: str, client: httpx.AsyncClient | None = None
@@ -138,11 +147,20 @@ class YouTubeService:
         configured, or ``YouTubeVideoUnavailableError`` for a non-200 response
         or a video with no retrievable metadata (E4). ``client`` is optional
         and lets tests inject an ``httpx.MockTransport``.
+
+        Results are cached in-process for ``KARAOKE_YOUTUBE_CACHE_TTL_SECONDS``
+        (M17): the same video previewed/submitted repeatedly — very common for
+        a popular school-night song — costs one API call instead of many.
         """
         if not self._api_key:
             raise YouTubeServiceConfigurationError(
                 "KARAOKE_YOUTUBE_API_KEY is not configured"
             )
+        cached = self._cache.get(video_id)
+        if cached is not None:
+            stored_at, data = cached
+            if time.monotonic() - stored_at < get_settings().youtube_cache_ttl_seconds:
+                return data
         owns_client = client is None
         http = client if client is not None else httpx.AsyncClient(timeout=10.0)
         try:
@@ -182,7 +200,7 @@ class YouTubeService:
         if not title:
             raise YouTubeVideoUnavailableError(video_id)
 
-        return YouTubeVideoData(
+        data = YouTubeVideoData(
             video_id=video_id,
             youtube_url=f"https://www.youtube.com/watch?v={video_id}",
             title=title,
@@ -190,6 +208,8 @@ class YouTubeService:
             duration_seconds=parse_iso_duration(content.get("duration") or ""),
             thumbnail_url=_pick_thumbnail(snippet.get("thumbnails") or {}),
         )
+        self._cache[video_id] = (time.monotonic(), data)
+        return data
 
 
 youtube_service = YouTubeService()

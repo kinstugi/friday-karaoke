@@ -23,6 +23,9 @@ os.environ["KARAOKE_ENVIRONMENT"] = "test"
 os.environ["KARAOKE_LOG_LEVEL"] = "WARNING"
 os.environ["KARAOKE_DATABASE_URL"] = "sqlite+aiosqlite://"
 os.environ["KARAOKE_DEBUG"] = "false"
+# M17: the suite is not coupled to wall-clock rate-limit windows; the limiter
+# itself is unit-tested directly and via an explicit 429 test that re-enables it.
+os.environ["KARAOKE_RATE_LIMITS_ENABLED"] = "false"
 
 from app.core.database import SessionFactory, engine  # noqa: E402
 from app.main import app  # noqa: E402

@@ -17,6 +17,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.dependencies import rate_limit
 from app.core.database import get_session
 from app.models.participant import Participant
 from app.models.session import Session
@@ -82,9 +83,14 @@ async def lookup_session(
 async def register_participant(
     join_code: str,
     payload: ParticipantCreateRequest,
+    _rate_limited: Annotated[None, Depends(rate_limit("join", 10, 60))],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> ParticipantJoinResponse:
-    """Register a participant by nickname and return their opaque token."""
+    """Register a participant by nickname and return their opaque token.
+
+    Rate-limited per IP (M17): the join endpoint is public (anyone with the QR
+    code), so it is the main abuse surface of the night.
+    """
     try:
         participant, raw_token = await participant_service.register(
             session, join_code, payload.nickname

@@ -179,3 +179,42 @@ async def test_fetch_metadata_non_json_body_raises_unavailable() -> None:
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         with pytest.raises(YouTubeVideoUnavailableError):
             await service.fetch_video_metadata(VIDEO_ID, client=client)
+
+
+# --- Metadata cache (M17, quota protection) ---------------------------------------
+
+
+async def test_fetch_metadata_caches_repeated_lookups() -> None:
+    """The same video fetched twice costs one API call (M17)."""
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(200, json=_video_api_response())
+
+    service = YouTubeService(api_key="test-key")
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        first = await service.fetch_video_metadata(VIDEO_ID, client=client)
+        second = await service.fetch_video_metadata(VIDEO_ID, client=client)
+
+    assert first == second
+    assert calls["n"] == 1
+
+
+async def test_fetch_metadata_cache_clears() -> None:
+    """clear_cache() forces a fresh fetch (admin/tests)."""
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(200, json=_video_api_response())
+
+    service = YouTubeService(api_key="test-key")
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        await service.fetch_video_metadata(VIDEO_ID, client=client)
+        await service.fetch_video_metadata(VIDEO_ID, client=client)
+        assert calls["n"] == 1
+
+        service.clear_cache()
+        await service.fetch_video_metadata(VIDEO_ID, client=client)
+    assert calls["n"] == 2

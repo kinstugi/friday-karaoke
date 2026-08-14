@@ -24,6 +24,7 @@ from app.api.dependencies import (
     get_current_host,
     get_current_participant,
     get_host_or_participant,
+    rate_limit,
 )
 from app.core.config import get_settings
 from app.core.database import get_session
@@ -137,10 +138,14 @@ async def _position_of(
 async def preview_song(
     session_id: uuid.UUID,
     payload: SongPreviewRequest,
+    _rate_limited: Annotated[None, Depends(rate_limit("preview", 20, 60))],
     participant: Annotated[Participant, Depends(get_current_participant)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> SongPreviewResponse:
-    """Validate a YouTube URL and return its metadata + any warning (E3/E4/B6)."""
+    """Validate a YouTube URL and return its metadata + any warning (E3/E4/B6).
+
+    Rate-limited per IP (M17): every preview hits the YouTube Data API (quota).
+    """
     await _session_for_participant(session, session_id, participant)
     data = await _fetch_video_data(payload.youtube_url)
 
@@ -161,10 +166,14 @@ async def preview_song(
 async def submit_song(
     session_id: uuid.UUID,
     payload: SongUrlRequest,
+    _rate_limited: Annotated[None, Depends(rate_limit("submit", 20, 60))],
     participant: Annotated[Participant, Depends(get_current_participant)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> SongSubmitResponse:
-    """Submit a song: validates + re-fetches metadata and creates a WAITING entry."""
+    """Submit a song: validates + re-fetches metadata and creates a WAITING entry.
+
+    Rate-limited per IP (M17): submission re-fetches metadata (YouTube quota).
+    """
     await _session_for_participant(session, session_id, participant)
     data = await _fetch_video_data(payload.youtube_url)
 

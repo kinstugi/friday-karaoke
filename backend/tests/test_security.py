@@ -1,11 +1,33 @@
-"""Unit tests for the security helpers (password hashing, auth tokens)."""
+"""Tests for the M17 security/abuse protections and the security helpers.
 
+Security helpers (password hashing, auth tokens) are covered first (M3); the
+M17 additions cover the in-process rate limiter (unit, with an injectable clock)
+and the endpoint wiring (a join storm returns 429 once the per-IP limit is
+exceeded).
+"""
+
+import pytest
+from fastapi.testclient import TestClient
+
+from app.core.config import Settings
+from app.core.ratelimit import RateLimitExceededError, RateLimiter
 from app.core.security import (
     generate_auth_token,
     hash_auth_token,
     hash_password,
     verify_password,
 )
+
+SESSIONS_URL = "/api/v1/sessions"
+JOIN_URL = "/api/v1/join"
+REGISTER_URL = "/api/v1/auth/host/register"
+LOGIN_URL = "/api/v1/auth/host/login"
+
+EMAIL = "host@example.com"
+PASSWORD = "correct-horse-battery-staple"
+
+
+# --- Security helpers (M3) ----------------------------------------------------------
 
 
 def test_hash_password_is_not_plaintext() -> None:
@@ -47,3 +69,107 @@ def test_hash_auth_token_is_deterministic_sha256_hex() -> None:
     assert hash_auth_token(token) == hash_auth_token(token)
     assert len(hash_auth_token(token)) == 64
     assert hash_auth_token(token) != token
+
+
+# --- RateLimiter (unit, M17) --------------------------------------------------------
+
+
+class _FakeClock:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def test_allows_up_to_limit_then_blocks() -> None:
+    clock = _FakeClock()
+    limiter = RateLimiter(now=clock)
+    for _ in range(3):
+        limiter.check("key", limit=3, window_seconds=60)
+    with pytest.raises(RateLimitExceededError):
+        limiter.check("key", limit=3, window_seconds=60)
+
+
+def test_window_resets_after_elapsed() -> None:
+    clock = _FakeClock()
+    limiter = RateLimiter(now=clock)
+    for _ in range(3):
+        limiter.check("key", limit=3, window_seconds=60)
+    with pytest.raises(RateLimitExceededError):
+        limiter.check("key", limit=3, window_seconds=60)
+
+    clock.now = 61.0  # a fresh window
+    limiter.check("key", limit=3, window_seconds=60)  # allowed again
+    limiter.check("key", limit=3, window_seconds=60)
+
+
+def test_keys_are_isolated() -> None:
+    clock = _FakeClock()
+    limiter = RateLimiter(now=clock)
+    for _ in range(3):
+        limiter.check("a", limit=3, window_seconds=60)
+    with pytest.raises(RateLimitExceededError):
+        limiter.check("a", limit=3, window_seconds=60)
+    # A different key is unaffected.
+    limiter.check("b", limit=3, window_seconds=60)
+
+
+# --- Endpoint wiring (429, M17) -------------------------------------------------------
+
+
+def test_join_storm_is_rate_limited(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With limits enabled and a fresh limiter, a join storm hits 429."""
+    monkeypatch.setattr("app.api.dependencies.rate_limiter", RateLimiter())
+    monkeypatch.setattr(
+        "app.api.dependencies.get_settings",
+        lambda: Settings(rate_limits_enabled=True),
+    )
+
+    register = client.post(
+        REGISTER_URL, json={"email": EMAIL, "password": PASSWORD}
+    )
+    assert register.status_code == 201, register.text
+    login = client.post(LOGIN_URL, json={"email": EMAIL, "password": PASSWORD})
+    headers = {"Authorization": f"Bearer {login.json()['token']}"}
+    session_body = client.post(SESSIONS_URL, json={}, headers=headers).json()
+
+    # The join limit is 10/min per IP: the first ten pass, the 11th is 429.
+    for i in range(10):
+        response = client.post(
+            f"{JOIN_URL}/{session_body['join_code']}/participants",
+            json={"nickname": f"User{i}"},
+        )
+        assert response.status_code == 201, response.text
+
+    response = client.post(
+        f"{JOIN_URL}/{session_body['join_code']}/participants",
+        json={"nickname": "Spammer"},
+    )
+    assert response.status_code == 429
+    assert "slow down" in response.json()["detail"]
+
+
+def test_rate_limits_are_disabled_in_tests_by_default(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The suite runs with limits disabled (conftest), so existing tests are
+    not coupled to wall-clock windows: more than 10 joins do NOT 429 here."""
+    register = client.post(
+        REGISTER_URL, json={"email": "other@example.com", "password": PASSWORD}
+    )
+    assert register.status_code == 201, register.text
+    login = client.post(
+        LOGIN_URL, json={"email": "other@example.com", "password": PASSWORD}
+    )
+    headers = {"Authorization": f"Bearer {login.json()['token']}"}
+    session_body = client.post(SESSIONS_URL, json={}, headers=headers).json()
+
+    for i in range(12):
+        response = client.post(
+            f"{JOIN_URL}/{session_body['join_code']}/participants",
+            json={"nickname": f"User{i}"},
+        )
+        assert response.status_code == 201, response.text

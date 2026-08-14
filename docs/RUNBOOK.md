@@ -470,6 +470,34 @@ EOF
 - The snapshot reports `rounds_completed` and per-participant `remaining_songs`;
   the host-only `/sessions/{id}/summary` reports submitted/sung/remaining.
 
+## Security / abuse protection verification (M17)
+
+Rate limits protect the public QR surface (join 10/min/IP, preview 20/min/IP,
+submit 20/min/IP → 429); the YouTube metadata cache protects the Data API quota.
+Quick check from `backend/`:
+
+```bash
+uv run python - <<'EOF'
+import uuid, httpx
+BASE = "http://localhost:8000"
+email = f"sec-{uuid.uuid4().hex[:8]}@school.edu"
+c = httpx.Client(timeout=30)
+c.post(f"{BASE}/api/v1/auth/host/register", json={"email": email, "password": "correct-horse-battery"})
+host = c.post(f"{BASE}/api/v1/auth/host/login", json={"email": email, "password": "correct-horse-battery"}).json()["token"]
+hh = {"Authorization": f"Bearer {host}"}
+s = c.post(f"{BASE}/api/v1/sessions", json={}, headers=hh).json()
+code = s["join_code"]
+statuses = [c.post(f"{BASE}/api/v1/join/{code}/participants", json={"nickname": f"U{i}"}).status_code for i in range(11)]
+print("join statuses:", statuses)   # 10 x 201 then 429 (rate limited)
+EOF
+```
+
+- The limiter is in-process (D9/D49); `KARAOKE_RATE_LIMITS_ENABLED=false` disables
+  it (the test suite sets this). Repeated previews/submissions of the same video
+  are served from the 1 h metadata cache (quota saver).
+- Covered by `backend/tests/test_security.py` (rate-limit tests) and
+  `backend/tests/test_youtube.py` (2 cache tests).
+
 ## Branch / commit workflow
 
 - Development happens on `dev`. Never commit directly to `master`.

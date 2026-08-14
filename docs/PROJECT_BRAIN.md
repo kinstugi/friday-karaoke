@@ -171,11 +171,18 @@ song cap, sessions not tied to a browser) are in `docs/PRODUCT_SPEC.md` §8–§
 
 ## 8. Current milestone
 
-**M17 — Security + abuse protection** (next; backend). M16 is complete; see
+**M18 — Testing + failure scenarios** (next; backend). M17 is complete; see
 `docs/DEV_BRAIN.md` for live status.
 
 ## 9. Completed milestones
 
+- **M17 — Security + abuse protection** (complete, backend): in-process fixed-
+  window rate limiting on the public QR surface (`app/core/ratelimit.py`, D49) —
+  join 10/min/IP, preview 20/min/IP, submit 20/min/IP → 429; a YouTube metadata
+  TTL cache (1 h) protects the Data API daily quota from repeated lookups of the
+  same video; the session retention strategy is documented (no destructive
+  cleanup in v1, M22 ops). 8 new tests (suite 230); pyright 0; live smoke: 11th
+  join 429, repeated previews cached.
 - **M16 — Round lifecycle cleanup + summaries** (complete, backend + frontend):
   absent-participant cleanup — `last_connected_at` on participants (set at join,
   refreshed on realtime connect) with a lazy GC-on-render cleanup
@@ -339,9 +346,8 @@ song cap, sessions not tied to a browser) are in `docs/PRODUCT_SPEC.md` §8–§
 
 - **Web Push is not implemented** (M15 = in-app notifications only); out-of-band
   "you're next" alerts need the M19 service worker + VAPID credentials.
-- Abuse protection (rate limiting, preview-call throttling for YouTube API
-  quota, further input hardening) is tracked for **M17**; the public QR join and
-  submit endpoints currently rely on the existing validation bounds.
+- Rate limits and the YouTube quota cache are in-process (D49): a multi-worker
+  deployment needs a shared limiter/store (M20).
 - YouTube playback is only exercisable in a real browser (autoplay policies,
   audio output); automated checks cover the build and the backend contract.
 - Realtime (M10) delivers only the events whose producers exist: `QueueUpdated`
@@ -433,6 +439,9 @@ See `docs/DECISIONS.md` for the full, maintained list. Highlights:
 - Round lifecycle (M16): absent-participant cleanup via `last_connected_at` +
   lazy GC-on-render (D48); snapshot round/participant summaries and a host-only
   session summary endpoint.
+- Security (M17): in-process per-IP rate limits on join/preview/submit (429
+  beyond the window) and a YouTube metadata TTL cache for quota protection; the
+  rest of the abuse-protection checklist was already in place (D49).
 - No user-visible feature in M0 beyond a health check.
 
 ## 12. Commands for running / testing

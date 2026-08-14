@@ -212,6 +212,7 @@ POST /api/v1/join/{joinCode}/participants
 409 { "detail": "this karaoke night has ended" }      # ENDED sessions cannot be joined
 409 { "detail": "nickname 'emma' is already taken" }  # case-insensitive per session
 422 { "detail": [...] }                                # blank/overlong nickname
+429 { "detail": "too many requests — please slow down" }   # M17: join is rate-limited (10/min/IP)
 ```
 
 Notes: the nickname rules are B14/D16 (trimmed, 1-20 chars, case-insensitive
@@ -246,6 +247,7 @@ POST /api/v1/sessions/{id}/entries            Authorization: Bearer <participant
 }
 401 / 404 (wrong session) / 409 (ended session, or per-participant cap B15) / 422 (bad URL)
 404 { "detail": "we couldn't load this video" }   # E4
+429 { "detail": "too many requests — please slow down" }   # M17: submit is rate-limited (20/min/IP)
 ```
 
 The entry is assigned to a round at submission (D43): the current round when the
@@ -341,6 +343,7 @@ POST /api/v1/sessions/{id}/entries/preview   Authorization: Bearer <participant 
 422 { "detail": "that doesn't look like a valid YouTube link" }   # E3: malformed/non-YouTube URL
 404 { "detail": "we couldn't load this video" }          # E4: valid format, metadata unavailable
 503 { "detail": "KARAOKE_YOUTUBE_API_KEY is not configured" }    # service unconfigured (D33)
+429 { "detail": "too many requests — please slow down" }         # M17: preview is rate-limited (20/min/IP)
 ```
 
 The preview is stateless (nothing persisted until M7). Metadata source is the

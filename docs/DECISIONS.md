@@ -787,6 +787,40 @@ These freeze MVP product behavior. They were captured in `docs/PRODUCT_SPEC.md`.
 
 ---
 
+## M17 security decisions
+
+## D49. In-process rate limiting + YouTube metadata quota cache
+
+- **Status:** Accepted
+- **Decision:** M17 adds a small in-process fixed-window rate limiter
+  (`app/core/ratelimit.py`, keyed by `<scope>:<client-ip>`, gated by
+  `KARAOKE_RATE_LIMITS_ENABLED`) protecting the public QR-code surface:
+  `POST /join/{code}/participants` (10/min/IP), `POST /sessions/{id}/entries/
+  preview` (20/min/IP) and `POST /sessions/{id}/entries` (20/min/IP) all return
+  429 when exceeded. The YouTube service gains an in-process TTL metadata cache
+  (`KARAOKE_YOUTUBE_CACHE_TTL_SECONDS`, default 1 h) so repeated previews/
+  submissions of the same video cost one Data API call instead of many —
+  protecting the free key's daily quota (D33). Sessions are intentionally
+  **retained** (no auto-deletion): ENDED is terminal, and a retention/cleanup
+  policy is an ops decision for M22, not a v1 feature.
+- **Rationale:** The realistic threats to a public QR code are join flooding and
+  YouTube quota exhaustion via preview/submit spam; both are cheaply bounded
+  in-process (D9 — single worker, no Redis). The existing defenses already
+  cover the rest of M17's checklist: Pydantic request validation + input length
+  limits, opaque hashed-at-rest tokens (D25/D31), per-session authorization with
+  cross-host 404s (D29), YouTube URL validation (D33/D34), and the per-
+  participant song cap (D45). CSRF does not apply (bearer headers, not cookies,
+  D25). Tests disable the limiter via the environment (conftest) so the suite
+  is not coupled to wall-clock windows; the limiter is unit-tested directly and
+  an integration test re-enables it to prove the 429 path.
+- **Rejected:** A third-party rate-limit dependency (extra dependency, no need);
+  Redis-based limiting (D9); a background sweep for session retention (deleting
+  data is destructive and unrequested — M22 ops decision); rate limiting the
+  public snapshot GET or WebSocket handshake (cheap paths; token-gated WS and
+  NAT-shared school IPs make it counterproductive).
+
+---
+
 ## Open questions (tracked)
 
 - ~~Authentication mechanism for hosts (email/password vs. school SSO)~~ — **M3

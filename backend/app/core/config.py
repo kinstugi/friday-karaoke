@@ -55,6 +55,13 @@ class Settings(BaseSettings):
     #: How long a participant may go without connecting before their remaining
     #: WAITING songs are cleaned up as absent (M16, PRODUCT_SPEC §6.9/E2).
     absent_participant_cleanup_seconds: int = 1800
+    #: Master switch for the in-process rate limits (M17). Tests disable it via
+    #: the environment so the suite is not coupled to wall-clock windows.
+    rate_limits_enabled: bool = True
+    #: In-process TTL (seconds) for the YouTube metadata cache (M17): protects
+    #: the Data API daily quota from repeated previews/submissions of the same
+    #: video.
+    youtube_cache_ttl_seconds: int = 3600
 
 
 @lru_cache
