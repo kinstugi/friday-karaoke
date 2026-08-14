@@ -171,11 +171,17 @@ song cap, sessions not tied to a browser) are in `docs/PRODUCT_SPEC.md` §8–§
 
 ## 8. Current milestone
 
-**M18 — Testing + failure scenarios** (next; backend). M17 is complete; see
+**M19 — PWA + mobile UX** (next; frontend). M18 is complete; see
 `docs/DEV_BRAIN.md` for live status.
 
 ## 9. Completed milestones
 
+- **M18 — Testing + failure scenarios** (complete, tests): formalized the
+  behavioral/concurrency/failure matrix — rapid-submission determinism,
+  find-or-create race handling (video + round), single-transition guarantees
+  under host intervention, E21 in both directions, and host/participant
+  reconnect recovery. 10 new tests (suite 240); pyright 0; tests-only, no code
+  changes (no bugs surfaced).
 - **M17 — Security + abuse protection** (complete, backend): in-process fixed-
   window rate limiting on the public QR surface (`app/core/ratelimit.py`, D49) —
   join 10/min/IP, preview 20/min/IP, submit 20/min/IP → 429; a YouTube metadata

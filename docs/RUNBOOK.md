@@ -498,6 +498,24 @@ EOF
 - Covered by `backend/tests/test_security.py` (rate-limit tests) and
   `backend/tests/test_youtube.py` (2 cache tests).
 
+## Concurrency / failure verification (M18)
+
+The concurrency + failure-scenario matrix is covered by
+`backend/tests/test_concurrency.py` (10 tests): deterministic ordering under
+rapid submissions, find-or-create race handling (video + round), "only one
+valid transition" when the host intervenes during automation, the E21
+cancel-vs-remove race in both directions, and host/participant reconnect
+recovery. Run the whole suite with:
+
+```bash
+cd backend && uv run pytest
+```
+
+- The test engine uses in-memory SQLite (StaticPool) so true simultaneous
+  requests are exercised as rapid sequential requests; real multi-connection
+  concurrency is verified against PostgreSQL at deployment (M20).
+- `pyright` stays the static gate: `uv run pyright`.
+
 ## Branch / commit workflow
 
 - Development happens on `dev`. Never commit directly to `master`.

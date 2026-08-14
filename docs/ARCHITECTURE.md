@@ -290,7 +290,10 @@ get correct state from the API.
   per-IP rate limits (`app/core/ratelimit.py`, D49) on join/preview/submit
   (429), a YouTube metadata TTL cache protecting the Data API quota, and a
   documented session-retention strategy.
-- **M18** — testing + failure scenarios.
+- **M18** — testing + failure scenarios (complete): concurrency/failure test
+  matrix (rapid-submission determinism, find-or-create races, single-transition
+  guarantees, E21 both directions, reconnect recovery) in `tests/test_concurrency.py`.
+- **M19** — PWA + mobile UX.
 - **M17–M19** — security, testing, PWA/mobile UX.
 - **M20–M22** — deployment, pilot, fixes.
 
