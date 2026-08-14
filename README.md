@@ -44,11 +44,25 @@ npm run typecheck
 
 Full local development commands: `docs/RUNBOOK.md`.
 
+## Live deployment (test)
+
+- **App (frontend + backend + API + WebSockets, one origin):**
+  **https://karaoke-app-ywmqmgfyoa-uc.a.run.app**
+- The frontend is served by the same Cloud Run container as the backend — the
+  URL above IS the frontend (the SPA at `/join/:code`, `/host`, etc.) and the
+  API (`/api/v1/...`) and WebSockets (`/api/v1/sessions/{id}/ws`).
+- Host login: `https://karaoke-app-ywmqmgfyoa-uc.a.run.app/host`
+- Backend liveness: `https://karaoke-app-ywmqmgfyoa-uc.a.run.app/health/ready`
+- Database: Neon free-tier Postgres; deployment commands in `docs/RUNBOOK.md`
+  (§ "Cloud Run deployment (test)").
+
 ## Status
 
-Milestone 0 (repository + project brain) is complete. The backend and frontend
-start; no business functionality exists yet. See `docs/DEV_BRAIN.md` for the
-current milestone and next task.
+All product milestones through **M18** are complete (join → round-robin queue →
+automatic playback → host moderation → notifications → round summaries → abuse
+protection), with a **240+ test** suite and a live Cloud Run test deployment.
+Next: **M19 — PWA + mobile UX**, then **M20 — deployment**. See
+`docs/DEV_BRAIN.md` for the current milestone and next task.
 
 ## Branch workflow
 

@@ -516,6 +516,38 @@ cd backend && uv run pytest
   concurrency is verified against PostgreSQL at deployment (M20).
 - `pyright` stays the static gate: `uv run pyright`.
 
+## Cloud Run deployment (test)
+
+A live test deployment runs on Google Cloud Run (single image serving the SPA +
+backend on one origin; see `Dockerfile`). Deployment commands:
+
+```bash
+# Build + push (from repo root; the container serves frontend/dist + /api + WS)
+docker build -t us-central1-docker.pkg.dev/portfolio-kwaku/karaoke/karaoke-app:latest .
+docker push us-central1-docker.pkg.dev/portfolio-kwaku/karaoke/karaoke-app:latest
+
+# Deploy (the database is external — a Neon free-tier Postgres in the pilot;
+# Cloud SQL is the M20 production option)
+gcloud run deploy karaoke-app \
+  --image=us-central1-docker.pkg.dev/portfolio-kwaku/karaoke/karaoke-app:latest \
+  --region=us-central1 --allow-unauthenticated --min-instances=0 --memory=512Mi --cpu=1 \
+  --set-env-vars="KARAOKE_DATABASE_URL=<postgresql+asyncpg://...?ssl=require>,KARAOKE_RATE_LIMITS_ENABLED=true,KARAOKE_YOUTUBE_API_KEY=<secret>"
+gcloud run services update karaoke-app --region=us-central1 \
+  --update-env-vars="KARAOKE_PUBLIC_BASE_URL=$(gcloud run services describe karaoke-app --region=us-central1 --format='value(status.url)')"
+```
+
+Notes:
+
+- The backend serves the built SPA via `KARAOKE_STATIC_DIR` (set in the image);
+  the root `/` stays the liveness endpoint and SPA deep links fall back to
+  `index.html` (`tests/test_spa.py`).
+- **WebSockets need HTTP/1.1** (Cloud Run's default) — do not enable HTTP/2.
+  With `--min-instances=0` a scale-to-zero cold start can drop a socket; the
+  frontend falls back to polling (B13). Raise `--min-instances=1` for reliable
+  realtime (~$7/mo).
+- The Neon/YouTube credentials are passed as env vars at deploy time and are
+  never committed; move them to Secret Manager for production (M20).
+
 ## Branch / commit workflow
 
 - Development happens on `dev`. Never commit directly to `master`.

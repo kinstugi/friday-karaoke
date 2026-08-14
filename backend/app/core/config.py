@@ -62,6 +62,10 @@ class Settings(BaseSettings):
     #: the Data API daily quota from repeated previews/submissions of the same
     #: video.
     youtube_cache_ttl_seconds: int = 3600
+    #: Directory containing the built frontend SPA (index.html + assets). When
+    #: set and present, the backend serves it on the same origin (single-image
+    #: deployment); None disables SPA serving (dev/tests).
+    static_dir: str | None = None
 
 
 @lru_cache
