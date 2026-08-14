@@ -7,83 +7,98 @@ of every milestone. The persistent context lives in `PROJECT_BRAIN.md`.
 
 ## Current milestone
 
-**M15 — Next-singer notifications** — COMPLETE (verified).
+**M16 — Round lifecycle cleanup + summaries** — COMPLETE (verified).
 
 ## Current task
 
-None (milestone finished). Next milestone: **M16 — Round lifecycle cleanup +
-summaries** (absent-participant cleanup, round/session summaries for the host).
+None (milestone finished). Next milestone: **M17 — Security + abuse protection**
+(request validation, rate limiting, input length limits, token hygiene, abuse
+protection for the public QR flow).
 
-## M15 scope (plan.md §M15)
+## M16 scope (plan.md §M16, revised at M10.1)
 
-- In-app "you're next" notifications delivered over the realtime channel and
-  rendered on the participant queue screen (PRODUCT_SPEC §11): when an entry is
-  promoted to `NEXT` and again at countdown start (timing configurable, §10).
-- Web Push is **deferred** (needs the M19 service worker + VAPID credentials) —
-  the school pilot's participants watch the queue screen live, so in-app is the
-  MVP notification (DECISIONS open question resolved).
+- **Absent-participant cleanup:** a participant who has left no longer occupies
+  future-round slots after the configured cleanup window (M16/D48).
+- **Round/session summaries:** rounds played + per-participant song counts for
+  the projector dashboard and the end-of-night wrap-up.
+- **End-of-night flow:** sessions already run multiple rounds without recreating
+  the QR code (M10.1/M13).
 
-## Verification results (M15 acceptance criteria, plan.md §M15)
+## Verification results (M16 acceptance criteria, plan.md §M16)
 
 | Acceptance criterion | Result |
 | -------------------- | ------ |
-| The next participant receives a clear notification | Verified — a typed `NextSingerNotified` event (payload: entry, participant, title, channel, phase) is broadcast on `NEXT` promotion (phase `next`) and on countdown start (phase `countdown`); the participant queue screen renders a "🎤 You're next! Get ready: <song> — <channel>" banner filtered to the participant's nickname, auto-dismissed after 8s |
-| Notification timing is configurable | Verified — the countdown-start notification rides the per-session `countdown_seconds` (M13); the `next` phase fires when the previous song ends |
-| In-app first, then Web Push | Verified — Web Push explicitly deferred and documented (DECISIONS open question resolved) |
+| A participant who has left no longer occupies a future-round slot after the configured cleanup window | Verified — participants carry `last_connected_at` (join + each realtime connect); stale participants' remaining `WAITING` entries are cancelled when the authoritative snapshot is built (`KARAOKE_ABSENT_PARTICIPANT_CLEANUP_SECONDS`, default 30 min); `test_absent_participant_entries_are_cleaned`, `test_ws_connect_refreshes_last_connected_at`, `test_cleanup_does_not_run_for_created_session` |
+| The host dashboard shows the active round and a per-participant song count | Verified — the snapshot carries `round_number`, `rounds_completed`, and `participants` (remaining counts); the dashboard queue rows show "· N more" and the queue heading shows "Round N (M completed)"; `test_snapshot_reports_rounds_completed_and_participants` |
+| A session runs multiple rounds without recreating the QR code | Verified — already true (M10.1 round-robin + auto-advance); regression-covered by the existing round tests |
 
 Additional verification:
 
-- Backend suite: **216 passed** (212 prior + 4 new notification tests), `pyright`
-  0 errors.
+- Backend suite: **223 passed** (216 prior + 7 new `tests/test_rounds.py`),
+  `pyright` 0 errors.
 - Frontend: `npm run typecheck`, `npm run lint`, `npm run build` all pass.
-- Live smoke against real PostgreSQL + real YouTube metadata: Alice's song ends
-  → Bob's participant WebSocket received `NextSingerNotified` phase `next`
-  ("Rick Astley - Never…"); after the cooldown, `play/advance` → phase
-  `countdown`. The event is broadcast to all subscribers and filtered
-  client-side on the participant's nickname.
+- Migration `0007_participant_cleanup` applied to live PostgreSQL (no drift);
+  `alembic current` at head.
+- Live smoke against real PostgreSQL + real YouTube metadata: snapshot
+  `participants` (Alice/Bob, 1 song each) + `rounds_completed` 0; the host-only
+  `GET /sessions/{id}/summary` returns per-participant submitted/sung/remaining
+  (participant token → 401); after one song, `songs_sung` increments.
 
-## Files changed (M15)
+## Files changed (M16)
 
 ```text
-backend/app/schemas/realtime.py      (NextSingerNotifiedEvent + union; docstring)
-backend/app/api/routes/playback.py   (_notify_next_singer helper; end/skip/finish/advance
-                                      broadcast the notification)
-backend/app/api/routes/entries.py    (host removal of the current singer also notifies
-                                      the next singer)
-backend/tests/test_playback.py       (4 notification WS tests; the M13 auto-start test
-                                      updated for the extra end events)
-frontend/src/ws/client.ts            (NextSingerNotifiedEvent type + parse)
-frontend/src/features/queue/QueueScreen.tsx (banner: filter by nickname, auto-dismiss 8s)
-frontend/src/App.css                 (.notify banner style)
+backend/alembic/versions/0007_participant_cleanup.py  (new — participants.last_connected_at)
+backend/app/core/config.py            (absent_participant_cleanup_seconds = 1800)
+backend/.env.example                  (+ the new setting)
+backend/app/models/participant.py     (last_connected_at)
+backend/app/services/participant.py   (register sets last_connected_at)
+backend/app/api/routes/realtime.py    (participant connect refreshes last_connected_at; clean
+                                       actor resolution refactor)
+backend/app/services/queue.py         (cleanup_absent_participants + rounds_completed +
+                                       participant_summaries + session_summary)
+backend/app/schemas/queue.py          (QueueParticipant; snapshot rounds_completed/participants)
+backend/app/schemas/session.py        (SessionParticipantSummary + SessionSummaryResponse)
+backend/app/api/routes/sessions.py    (GET /sessions/{id}/summary, host-only)
+backend/tests/test_rounds.py          (new — 7 tests)
+frontend/src/api/types.ts             (QueueParticipant, SessionSummary types; snapshot fields)
+frontend/src/api/host.ts              (fetchSessionSummary)
+frontend/src/features/host/HostDashboardScreen.tsx (queue rows show "· N more"; heading shows
+                                       "Round N (M completed)")
 docs/PROJECT_BRAIN.md, docs/ARCHITECTURE.md, docs/DEV_BRAIN.md, docs/API_CONTRACT.md,
-docs/RUNBOOK.md, docs/DECISIONS.md (Web Push open question resolved), docs/PRODUCT_SPEC.md (§11)
+docs/RUNBOOK.md, docs/DECISIONS.md (D48)
 ```
 
-## Implementation notes (M15)
+## Implementation notes (M16)
 
-- **Delivery:** a typed `NextSingerNotifiedEvent` is broadcast to every
-  subscriber of the session (the hub is not per-participant targeted); the
-  participant queue screen filters on `participant_name === identity.nickname`.
-  The event is delivery-only (D5): the banner is ephemeral UI and the
-  authoritative state remains the snapshot.
-- **Moments:** phase `next` fires on `NEXT` promotion (the previous song ended /
-  host skip / host finish / host removal of the singer); phase `countdown` fires
-  when the countdown transition begins (immediately on skip/finish/removal, or
-  after the cooldown via `play/advance`). With a cooldown, the two phases are
-  ~`cooldown_seconds` apart; without one they arrive together (the banner simply
-  shows the latest message).
-- **Frontend:** the banner auto-dismisses after 8 s (timer cleared on a new
-  notification and on unmount); the Up-next card's live countdown (M13) remains
-  the persistent "starts in Ns" display.
-- **No scope creep:** no Web Push/service worker/VAPID (deferred to the PWA
-  milestone), no new dependencies, no schema change.
+- **Presence signal (D48):** `participants.last_connected_at` is set at join and
+  refreshed on each realtime connect (the participant's phone keeps the socket
+  open while watching the queue). NULL means "never tracked" (treated as
+  present — never cleaned), which safely covers any pre-M16 rows.
+- **Lazy cleanup (D48):** `QueueService.cleanup_absent_participants` runs at the
+  top of `snapshot` (so every render — the public GET, every `QueueUpdated`
+  broadcast, every playback endpoint — sees a clean queue). It only acts on
+  `ACTIVE`/`PAUSED` sessions and only cancels `WAITING` entries (absent
+  `NEXT`/`SINGING` singers stay the host's skip call). Idempotent and cheap when
+  nobody is stale.
+- **Summaries:** the snapshot carries `rounds_completed` (rounds below the
+  derived active round) and `participants` (remaining counts, in stable
+  participant order). The host-only `GET /sessions/{id}/summary` returns
+  submitted/sung/remaining per participant for the wrap-up.
+- **Frontend:** the dashboard queue rows show "· N more" when a participant has
+  songs beyond their current one, and the queue heading shows the completed-
+  rounds count. No extra request needed for the round display (the snapshot
+  carries it).
+- **No scope creep:** no background sweep task (D48), no new polling, no
+  notification changes, no schema change beyond `0007`.
 
-## Tests added (M15)
+## Tests added (M16)
 
-- `tests/test_playback.py` (4): `end` broadcasts `next`; `finish` broadcasts
-  both `next` + `countdown`; `advance` (cooldown → countdown) broadcasts
-  `countdown`; host removal of the singer broadcasts both phases. The M13
-  auto-start WS test was updated for the additional `end` events.
+- `tests/test_rounds.py` (7): stale participant's entries cleaned (active
+  session); recently-connected participant not cleaned; cleanup skipped for
+  CREATED sessions; WS connect refreshes `last_connected_at`; snapshot
+  `rounds_completed`/`participants` (including round auto-advance); the summary
+  endpoint's counts + songs-sung updates; summary auth (401 no auth / 401
+  participant / 404 other host).
 
 ## Current blockers
 
@@ -97,14 +112,14 @@ docs/RUNBOOK.md, docs/DECISIONS.md (Web Push open question resolved), docs/PRODU
   for an upstream fix.
 - `RealtimeHub` is in-process/per-worker (D42): a multi-worker deployment needs
   a shared hub (Redis) — tracked for M20 deployment.
-- Web Push (service worker + VAPID) is deferred from M15 to the PWA milestone
-  (M19) — documented in DECISIONS.
+- Web Push deferred to the PWA milestone (M19) — documented in DECISIONS.
+- The lazy cleanup writes on the public snapshot GET (documented in D48): the
+  write is idempotent and only fires when stale participants exist, so it is not
+  a meaningful DoS surface at school scale (revisited in M17 if needed).
 
 ## Next recommended task
 
-**M16 — Round lifecycle cleanup + summaries** (backend + frontend): the revised
-milestone from M10.1 — absent-participant cleanup (a disconnected/absent
-participant should not silently keep future-round slots forever), and round/
-session summaries surfaced to the host (rounds played, per-participant song
-counts, remaining lists). The round-robin engine and automatic transitions are
-already live (M10.1/M13); this milestone completes the round concept.
+**M17 — Security + abuse protection** (backend): request validation, rate
+limiting, input length limits, token hygiene, and abuse protection for the
+public QR join flow (PRODUCT_SPEC §M17 / plan.md §M17) — e.g. joining/submission
+rate limits, preview-call throttling (YouTube API quota), and bounds checks.

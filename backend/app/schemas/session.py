@@ -37,3 +37,22 @@ class SessionResponse(BaseModel):
     created_at: datetime
     started_at: datetime | None
     ended_at: datetime | None
+
+
+class SessionParticipantSummary(BaseModel):
+    """Per-participant round statistics (M16)."""
+
+    nickname: str
+    songs_submitted: int
+    songs_sung: int
+    songs_remaining: int
+
+
+class SessionSummaryResponse(BaseModel):
+    """Host-facing round/session summary (M16, end-of-night wrap-up)."""
+
+    session_id: uuid.UUID
+    status: SessionStatus
+    active_round: int
+    rounds_completed: int
+    participants: list[SessionParticipantSummary]

@@ -755,6 +755,38 @@ These freeze MVP product behavior. They were captured in `docs/PRODUCT_SPEC.md`.
 
 ---
 
+## M16 round-lifecycle decisions
+
+## D48. Absent-participant cleanup via last-connection tracking (lazy, GC-on-render)
+
+- **Status:** Accepted
+- **Decision:** Participants carry a `last_connected_at` (set at join and
+  refreshed on every realtime connect, migration `0007`). While a session is
+  `ACTIVE`/`PAUSED`, participants who have not connected for
+  `KARAOKE_ABSENT_PARTICIPANT_CLEANUP_SECONDS` (default 30 min) have their
+  remaining `WAITING` entries cancelled. The cleanup runs **lazily whenever the
+  authoritative queue snapshot is built** (a garbage-collection-on-render step,
+  idempotent and cheap when nobody is stale). Only `WAITING` entries are
+  cleaned: an absent `NEXT`/`SINGING` singer is the host's skip call (E2/E6).
+  M16 also adds round/participant summaries: `rounds_completed` + per-
+  participant `remaining_songs` in the snapshot, and a host-only
+  `GET /api/v1/sessions/{id}/summary` endpoint (rounds played + per-participant
+  submitted/sung/remaining) for the projector and the end-of-night wrap-up.
+- **Rationale:** In the round-robin model an absent singer already cannot block
+  the queue indefinitely (the host skips them), so cleanup is hygiene — freeing
+  future-round slots of people who left. Tracking last realtime connection is
+  the simplest non-invasive presence signal (no new polling), and running the
+  cleanup on snapshot render avoids background timers entirely (consistent with
+  D47) while guaranteeing the authoritative state never shows ghost entries.
+  The write is idempotent and only fires when stale participants exist.
+- **Rejected:** A periodic background sweep task (restart/multi-worker fragility,
+  D47 spirit); heartbeat pings from clients (extra protocol); treating absence as
+  immediate (network blips would wrongly cancel songs — the window absorbs
+  them); cleaning `NEXT`/`SINGING` entries (the host, not automation, handles an
+  absent current singer).
+
+---
+
 ## Open questions (tracked)
 
 - ~~Authentication mechanism for hosts (email/password vs. school SSO)~~ — **M3

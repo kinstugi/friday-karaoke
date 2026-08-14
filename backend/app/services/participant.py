@@ -7,6 +7,7 @@ enforced here; token hygiene follows D25 (only a SHA-256 digest is stored).
 """
 
 import uuid
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -113,6 +114,7 @@ class ParticipantService:
             nickname=display_nickname,
             nickname_lower=nickname_lower,
             token_hash=hash_auth_token(raw_token),
+            last_connected_at=datetime.now(timezone.utc),
         )
         session.add(participant)
         try:

@@ -285,6 +285,11 @@ export default function HostDashboardScreen() {
       (e) => e.id !== nowSinging?.id && e.status !== 'SINGING',
     ) ?? null
 
+  // M16: per-participant remaining-song counts (the row shows "N more").
+  const remainingByNickname = new Map(
+    snapshot?.participants.map((p) => [p.nickname, p.remaining_songs]) ?? [],
+  )
+
   return (
     <div className="host-dashboard">
       <header className="host-header">
@@ -436,7 +441,10 @@ export default function HostDashboardScreen() {
 
           <section className="host-queue">
             <h2>
-              Queue{snapshot ? ` · Round ${snapshot.round_number}` : ''}
+              Queue
+              {snapshot
+                ? ` · Round ${snapshot.round_number}${snapshot.rounds_completed > 0 ? ` (${snapshot.rounds_completed} completed)` : ''}`
+                : ''}
             </h2>
             {snapshot === null ? (
               <p className="muted">Loading queue…</p>
@@ -446,6 +454,8 @@ export default function HostDashboardScreen() {
               <ol className="queue-list">
                 {snapshot.queue.map((entry) => {
                   const editing = editingId === entry.id
+                  const moreSongs =
+                    (remainingByNickname.get(entry.participant_name) ?? 0) - 1
                   return (
                     <li key={entry.id}>
                       <span className="position">{entry.position ?? '—'}</span>
@@ -455,6 +465,7 @@ export default function HostDashboardScreen() {
                           {entry.participant_name} &middot;{' '}
                           {formatDuration(entry.duration_seconds)} &middot;{' '}
                           {entryStatusLabel(entry.status)}
+                          {moreSongs > 0 ? ` · ${moreSongs} more` : ''}
                         </span>
                         {editing ? (
                           <div className="stack host-edit">

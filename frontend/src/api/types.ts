@@ -71,14 +71,36 @@ export interface QueueEntry {
   created_at: string
 }
 
+export interface QueueParticipant {
+  nickname: string
+  remaining_songs: number
+}
+
 export interface QueueSnapshot {
   session_id: string
   status: SessionStatus
   round_number: number
+  rounds_completed: number
   playback_state: PlaybackState
   transition_until: string | null
   transition_remaining_seconds: number | null
+  participants: QueueParticipant[]
   queue: QueueEntry[]
+}
+
+export interface SessionParticipantSummary {
+  nickname: string
+  songs_submitted: number
+  songs_sung: number
+  songs_remaining: number
+}
+
+export interface SessionSummary {
+  session_id: string
+  status: SessionStatus
+  active_round: number
+  rounds_completed: number
+  participants: SessionParticipantSummary[]
 }
 
 export interface SongSubmitResult {

@@ -171,11 +171,20 @@ song cap, sessions not tied to a browser) are in `docs/PRODUCT_SPEC.md` §8–§
 
 ## 8. Current milestone
 
-**M16 — Round lifecycle cleanup + summaries** (next; backend + frontend). M15 is
-complete; see `docs/DEV_BRAIN.md` for live status.
+**M17 — Security + abuse protection** (next; backend). M16 is complete; see
+`docs/DEV_BRAIN.md` for live status.
 
 ## 9. Completed milestones
 
+- **M16 — Round lifecycle cleanup + summaries** (complete, backend + frontend):
+  absent-participant cleanup — `last_connected_at` on participants (set at join,
+  refreshed on realtime connect) with a lazy GC-on-render cleanup
+  (`KARAOKE_ABSENT_PARTICIPANT_CLEANUP_SECONDS`, default 30 min, D48, migration
+  `0007`) that cancels stale participants' remaining WAITING songs. Round/
+  participant summaries: `rounds_completed` + per-participant `remaining_songs`
+  in the snapshot (dashboard shows "Round N (M completed)" and "· N more" per
+  row), plus a host-only `GET /sessions/{id}/summary` (submitted/sung/remaining)
+  for the wrap-up. 7 new tests (suite 223); pyright 0; live smoke confirmed.
 - **M15 — Next-singer notifications** (complete, backend + frontend): a typed
   `NextSingerNotified` realtime event (phase `next` on `NEXT` promotion, phase
   `countdown` at countdown start) delivers in-app "you're next!" notifications;
@@ -330,7 +339,9 @@ complete; see `docs/DEV_BRAIN.md` for live status.
 
 - **Web Push is not implemented** (M15 = in-app notifications only); out-of-band
   "you're next" alerts need the M19 service worker + VAPID credentials.
-  Round/session summaries and absent-participant cleanup land in M16.
+- Abuse protection (rate limiting, preview-call throttling for YouTube API
+  quota, further input hardening) is tracked for **M17**; the public QR join and
+  submit endpoints currently rely on the existing validation bounds.
 - YouTube playback is only exercisable in a real browser (autoplay policies,
   audio output); automated checks cover the build and the backend contract.
 - Realtime (M10) delivers only the events whose producers exist: `QueueUpdated`
@@ -419,6 +430,9 @@ See `docs/DECISIONS.md` for the full, maintained list. Highlights:
   with no background timers — the dashboard counts down and calls the idempotent
   `play/advance`; host skip/finish skip the cooldown (D20, D46 superseded by
   D47).
+- Round lifecycle (M16): absent-participant cleanup via `last_connected_at` +
+  lazy GC-on-render (D48); snapshot round/participant summaries and a host-only
+  session summary endpoint.
 - No user-visible feature in M0 beyond a health check.
 
 ## 12. Commands for running / testing

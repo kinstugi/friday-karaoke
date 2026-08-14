@@ -13,9 +13,9 @@ it empties.
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
@@ -23,12 +23,14 @@ from sqlalchemy.orm import aliased
 from app.core.config import get_settings
 from app.domain.playback import ensure_utc
 from app.domain.queue_entry import QueueEntryStatus
+from app.domain.session import SessionStatus
 from app.models.participant import Participant
 from app.models.queue_entry import QueueEntry
 from app.models.round import Round
 from app.models.session import Session
 from app.models.youtube_video import YouTubeVideo
-from app.schemas.queue import QueueEntryResponse, QueueSnapshotResponse
+from app.schemas.queue import QueueEntryResponse, QueueParticipant, QueueSnapshotResponse
+from app.schemas.session import SessionParticipantSummary, SessionSummaryResponse
 from app.schemas.youtube import YouTubeVideoData
 from app.services.session import SessionNotFoundError, session_service
 
@@ -203,12 +205,14 @@ class QueueService:
     async def snapshot(
         self, session: AsyncSession, session_id: uuid.UUID
     ) -> QueueSnapshotResponse:
-        """Return the authoritative queue snapshot (REST + realtime, M11/M13).
+        """Return the authoritative queue snapshot (REST + realtime, M11/M13/M16).
 
-        ``playback_state`` is the stored state (M13, decision D47);
+        Runs the absent-participant cleanup first (M16) so the rendered queue
+        never shows ghost entries; ``playback_state`` is the stored state (D47);
         ``transition_remaining_seconds`` is computed from the authoritative
-        transition deadline for countdown display.
+        deadline.
         """
+        await self.cleanup_absent_participants(session, session_id)
         karaoke = await session_service.get_by_id(session, session_id)
         active = await self.get_active_entries(session, session_id)
         remaining: float | None = None
@@ -224,13 +228,153 @@ class QueueService:
             session_id=karaoke.id,
             status=karaoke.status,
             round_number=await self.get_current_round_number(session, session_id),
+            rounds_completed=await self.rounds_completed(session, session_id),
             playback_state=karaoke.playback_state,
             transition_until=karaoke.transition_until,
             transition_remaining_seconds=remaining,
+            participants=await self.participant_summaries(session, session_id),
             queue=[
                 self.entry_response(entry, index)
                 for index, entry in enumerate(active, start=1)
             ],
+        )
+
+    async def cleanup_absent_participants(
+        self, session: AsyncSession, session_id: uuid.UUID
+    ) -> None:
+        """Mark the remaining WAITING entries of absent participants CANCELLED.
+
+        A participant is absent when they have not connected to the realtime
+        channel for ``KARAOKE_ABSENT_PARTICIPANT_CLEANUP_SECONDS`` (default
+        30 min, M16). The cleanup runs lazily whenever the authoritative
+        snapshot is built; it is idempotent and cheap when nobody is stale.
+        Only WAITING entries are cleaned — an absent ``NEXT``/``SINGING``
+        singer is the host's skip call (E2/E6).
+        """
+        karaoke = await session_service.get_by_id(session, session_id)
+        if karaoke.status not in (SessionStatus.ACTIVE, SessionStatus.PAUSED):
+            return
+        cutoff = datetime.now(timezone.utc) - timedelta(
+            seconds=get_settings().absent_participant_cleanup_seconds
+        )
+        participants = await session.scalars(
+            select(Participant).where(Participant.session_id == session_id)
+        )
+        stale_ids = [
+            participant.id
+            for participant in participants
+            if participant.last_connected_at is not None
+            and ensure_utc(participant.last_connected_at) < cutoff
+        ]
+        if not stale_ids:
+            return
+        entries = await session.scalars(
+            select(QueueEntry).where(
+                QueueEntry.session_id == session_id,
+                QueueEntry.participant_id.in_(stale_ids),
+                QueueEntry.status == QueueEntryStatus.WAITING,
+            )
+        )
+        now = datetime.now(timezone.utc)
+        changed = False
+        for entry in entries:
+            entry.status = QueueEntryStatus.CANCELLED
+            entry.ended_at = now
+            changed = True
+        if changed:
+            await session.commit()
+
+    async def rounds_completed(
+        self, session: AsyncSession, session_id: uuid.UUID
+    ) -> int:
+        """Return how many rounds have been fully played (M16).
+
+        The active round is the lowest with a non-terminal entry (D43), so every
+        round below it is complete; when nothing is queued, every round that has
+        ever held an entry is complete.
+        """
+        active = await self._active_round(session, session_id)
+        if active is not None:
+            return max(0, active.number - 1)
+        highest = await session.scalar(
+            select(func.max(Round.number))
+            .join(QueueEntry, QueueEntry.round_id == Round.id)
+            .where(Round.session_id == session_id)
+        )
+        return highest if highest is not None else 0
+
+    async def participant_summaries(
+        self, session: AsyncSession, session_id: uuid.UUID
+    ) -> list[QueueParticipant]:
+        """Per-participant remaining-song counts (M16).
+
+        Ordered by the stable participant order (earliest submission). Only
+        participants with at least one non-terminal entry appear.
+        """
+        rows = await session.execute(
+            select(Participant.nickname, func.count(QueueEntry.id))
+            .join(QueueEntry, QueueEntry.participant_id == Participant.id)
+            .where(
+                QueueEntry.session_id == session_id,
+                QueueEntry.status.in_(QueueEntryStatus.non_terminal()),
+            )
+            .group_by(Participant.id, Participant.nickname)
+            .order_by(func.min(QueueEntry.created_at), Participant.id)
+        )
+        return [
+            QueueParticipant(nickname=nickname, remaining_songs=count)
+            for nickname, count in rows
+        ]
+
+    async def session_summary(
+        self, session: AsyncSession, session_id: uuid.UUID
+    ) -> SessionSummaryResponse:
+        """Host-facing round/session summary (M16, end-of-night wrap-up).
+
+        Per participant: songs submitted (all), sung (``COMPLETED``), and still
+        queued (non-terminal). Rounds played = ``rounds_completed``.
+        """
+        karaoke = await session_service.get_by_id(session, session_id)
+        rows = await session.execute(
+            select(
+                Participant.nickname,
+                func.count(QueueEntry.id),
+                func.sum(
+                    case(
+                        (QueueEntry.status == QueueEntryStatus.COMPLETED, 1),
+                        else_=0,
+                    )
+                ),
+                func.sum(
+                    case(
+                        (
+                            QueueEntry.status.in_(QueueEntryStatus.non_terminal()),
+                            1,
+                        ),
+                        else_=0,
+                    )
+                ),
+            )
+            .join(QueueEntry, QueueEntry.participant_id == Participant.id)
+            .where(QueueEntry.session_id == session_id)
+            .group_by(Participant.id, Participant.nickname)
+            .order_by(func.min(QueueEntry.created_at), Participant.id)
+        )
+        participants = [
+            SessionParticipantSummary(
+                nickname=nickname,
+                songs_submitted=int(submitted),
+                songs_sung=int(sung if sung is not None else 0),
+                songs_remaining=int(remaining if remaining is not None else 0),
+            )
+            for nickname, submitted, sung, remaining in rows
+        ]
+        return SessionSummaryResponse(
+            session_id=karaoke.id,
+            status=karaoke.status,
+            active_round=await self.get_current_round_number(session, session_id),
+            rounds_completed=await self.rounds_completed(session, session_id),
+            participants=participants,
         )
 
     async def get_entry(

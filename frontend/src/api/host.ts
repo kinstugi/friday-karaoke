@@ -1,6 +1,12 @@
 // API calls for the host dashboard (backend M3 host auth + M4/M5 sessions).
 import { apiRequest, apiRequestText } from './client'
-import type { HostLoginResult, HostProfile, QueueSnapshot, Session } from './types'
+import type {
+  HostLoginResult,
+  HostProfile,
+  QueueSnapshot,
+  Session,
+  SessionSummary,
+} from './types'
 
 const AUTH_BASE = '/api/v1/auth/host'
 const SESSIONS_BASE = '/api/v1/sessions'
@@ -40,6 +46,17 @@ export function createSession(token: string, name?: string): Promise<Session> {
 
 export function fetchSession(token: string, sessionId: string): Promise<Session> {
   return apiRequest<Session>(`${SESSIONS_BASE}/${sessionId}`, { token })
+}
+
+/** Host-facing round/session summary (M16): rounds played + per-participant
+ *  song counts for the dashboard and the end-of-night wrap-up. */
+export function fetchSessionSummary(
+  token: string,
+  sessionId: string,
+): Promise<SessionSummary> {
+  return apiRequest<SessionSummary>(`${SESSIONS_BASE}/${sessionId}/summary`, {
+    token,
+  })
 }
 
 export function startSession(token: string, sessionId: string): Promise<Session> {

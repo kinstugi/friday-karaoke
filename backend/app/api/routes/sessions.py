@@ -27,7 +27,12 @@ from app.models.host import Host
 from app.models.session import Session
 from app.realtime.hub import realtime_hub
 from app.schemas.realtime import SessionUpdatedEvent
-from app.schemas.session import SessionCreateRequest, SessionResponse
+from app.schemas.session import (
+    SessionCreateRequest,
+    SessionResponse,
+    SessionSummaryResponse,
+)
+from app.services.queue import queue_service
 from app.services.session import (
     InvalidSessionTransitionError,
     SessionNotFoundError,
@@ -110,6 +115,25 @@ async def session_detail(
     except SessionNotFoundError as exc:
         raise _not_found() from exc
     return _session_to_response(karaoke)
+
+
+@router.get("/{session_id}/summary", response_model=SessionSummaryResponse)
+async def session_summary(
+    session_id: uuid.UUID,
+    current_host: Annotated[Host, Depends(get_current_host)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> SessionSummaryResponse:
+    """Return the host's round/session summary (M16).
+
+    Rounds played, the active round, and per-participant song counts
+    (submitted / sung / remaining) for the projector dashboard and the
+    end-of-night wrap-up.
+    """
+    try:
+        await session_service.get_for_host(session, current_host.id, session_id)
+    except SessionNotFoundError as exc:
+        raise _not_found() from exc
+    return await queue_service.session_summary(session, session_id)
 
 
 @router.post("/{session_id}/start", response_model=SessionResponse)

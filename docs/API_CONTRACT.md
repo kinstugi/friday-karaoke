@@ -106,6 +106,7 @@ bcrypt-hashed. Emails are stored lowercase (case-insensitive uniqueness).
 | POST   | /api/v1/sessions           | host | Create session                |
 | GET    | /api/v1/sessions           | host | List own sessions, newest first (M9) |
 | GET    | /api/v1/sessions/{id}      | host | Get session (owning host)     |
+| GET    | /api/v1/sessions/{id}/summary | host | Round/session summary (M16)  |
 | POST   | /api/v1/sessions/{id}/start| host | Start session (owning host)   |
 | POST   | /api/v1/sessions/{id}/end  | host | End session (owning host)     |
 | GET    | /api/v1/sessions/{id}/qr   | host | Join URL as SVG QR code (M5)  |
@@ -252,7 +253,7 @@ participant has no non-terminal entry there, otherwise the next round above thei
 highest round. `position` is `null` for future-round entries (not yet in the
 active queue).
 
-### Queue snapshot (M7, round-scoped at M10.1)
+### Queue snapshot (M7, round-scoped at M10.1, summaries at M16)
 
 ```text
 GET /api/v1/sessions/{id}/entries                # public, no auth
@@ -260,6 +261,11 @@ GET /api/v1/sessions/{id}/entries                # public, no auth
   "session_id": "...",
   "status": "ACTIVE",
   "round_number": 2,                             # active round (M10.1)
+  "rounds_completed": 1,                         # fully-played rounds (M16)
+  "playback_state": "PLAYING",                   # stored (M13, D47)
+  "transition_until": null,                      # transition deadline (M13)
+  "transition_remaining_seconds": null,          # countdown display (M13)
+  "participants": [ { "nickname": "Alice", "remaining_songs": 2 }, ... ],  # M16
   "queue": [ { ...QueueEntryResponse as above, "position": 1 }, ... ]
 }                                                # current round, stable participant order (D43)
 404 { "detail": "session not found" }
@@ -268,8 +274,22 @@ GET /api/v1/sessions/{id}/entries                # public, no auth
 Positions are computed within the current round from the authoritative stable
 participant order (each participant's earliest submission time; decision D43);
 future-round songs are not part of the snapshot and have no position. There is no
-mutable position field. The snapshot is sanitized (no host identity, no
-participant tokens).
+mutable position field. `rounds_completed` counts the rounds fully played and
+`participants` the per-participant remaining-song counts (M16). The snapshot is
+sanitized (no host identity, no participant tokens).
+
+### Session summary (M16)
+
+```text
+GET /api/v1/sessions/{id}/summary                Authorization: Bearer <host token>
+200 {
+  "session_id": "...", "status": "ACTIVE",
+  "active_round": 2, "rounds_completed": 1,
+  "participants": [ { "nickname": "Alice", "songs_submitted": 3,
+                      "songs_sung": 1, "songs_remaining": 2 }, ... ]
+}
+404 { "detail": "session not found" }             # unknown or another host's
+```
 
 ### Cancel / remove / edit (M7)
 

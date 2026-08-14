@@ -97,15 +97,16 @@ Implementation status at M6:
   when rounds became automatic — see `docs/PRODUCT_SPEC.md` §3 and DECISIONS D44.)
 - **Services:** `HostAuthService` (M3), `SessionService` (M4: create/get/start/
   end/pause/resume, unique join codes, creates round 1), `ParticipantService`
-  (M5: public session lookup, participant registration, token lookup),
-  `YouTubeService` (M6: Data API v3 metadata fetch, URL validation, duration
-  parsing), `QueueService` (M7/M10.1: round-robin engine — round assignment,
-  derived active round, stable ordering, per-participant cap, snapshots with
-  computed positions, cancel/remove, host URL editing), `PlaybackService` (M11/
-  M13: host-driven start/skip/finish and automatic transitions — `play/end`
-  begins COOLDOWN → COUNTDOWN → auto-start, host skip/finish skip the cooldown;
-  playback state is stored on the session with authoritative transition
-  deadlines, D47).
+  (M5/M16: public session lookup, participant registration + `last_connected_at`
+  presence tracking, token lookup), `YouTubeService` (M6: Data API v3 metadata
+  fetch, URL validation, duration parsing), `QueueService` (M7/M10.1/M16:
+  round-robin engine — round assignment, derived active round, stable ordering,
+  per-participant cap, snapshots with computed positions + round/participant
+  summaries, lazy absent-participant cleanup, cancel/remove, host URL editing),
+  `PlaybackService` (M11/M13: host-driven start/skip/finish and automatic
+  transitions — `play/end` begins COOLDOWN → COUNTDOWN → auto-start, host
+  skip/finish skip the cooldown; playback state is stored on the session with
+  authoritative transition deadlines, D47).
 - **API:** health at root; host auth under `/api/v1/auth/host` (M3); sessions
   under `/api/v1/sessions` (create/get/**list (M9)**/start/end + SVG QR, M4/M5); public join
   under `/api/v1/join` (M5); song endpoints under `/api/v1/sessions/{id}/entries`
@@ -280,7 +281,11 @@ get correct state from the API.
   an entry is promoted to `NEXT` and when the countdown begins; the participant
   queue screen renders a filtered auto-dismissing banner. Web Push deferred to
   the PWA milestone (M19).
-- **M16** — round lifecycle cleanup + summaries.
+- **M16** — round lifecycle cleanup + summaries (complete): absent-participant
+  cleanup via `participants.last_connected_at` (join + realtime connect) with a
+  lazy GC-on-render pass (D48, migration `0007`); snapshot `rounds_completed` +
+  per-participant `remaining_songs`; host-only `GET /sessions/{id}/summary`.
+- **M17** — security + abuse protection.
 - **M17–M19** — security, testing, PWA/mobile UX.
 - **M20–M22** — deployment, pilot, fixes.
 

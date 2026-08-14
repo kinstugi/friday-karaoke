@@ -48,6 +48,13 @@ class SongSubmitResponse(BaseModel):
     notice: str | None
 
 
+class QueueParticipant(BaseModel):
+    """Per-participant queue summary (M16): how many songs remain queued."""
+
+    nickname: str
+    remaining_songs: int
+
+
 class QueueSnapshotResponse(BaseModel):
     """Public, sanitized queue view (no host identity, no participant tokens).
 
@@ -58,12 +65,16 @@ class QueueSnapshotResponse(BaseModel):
     ``COUNTDOWN`` during an automatic transition. ``transition_until`` is the
     absolute deadline of the current transition phase (None otherwise) and
     ``transition_remaining_seconds`` its remaining time for countdown display.
+    ``rounds_completed`` and ``participants`` (per-participant remaining-song
+    counts) are the M16 round summaries.
     """
 
     session_id: uuid.UUID
     status: SessionStatus
     round_number: int
+    rounds_completed: int
     playback_state: PlaybackState
     transition_until: datetime | None
     transition_remaining_seconds: float | None
+    participants: list[QueueParticipant]
     queue: list[QueueEntryResponse]

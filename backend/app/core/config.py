@@ -52,6 +52,9 @@ class Settings(BaseSettings):
     #: Default next-singer countdown in seconds (M13, PRODUCT_SPEC §10).
     #: Per-session override: ``countdown_seconds`` on session creation.
     next_singer_countdown_seconds: int = 20
+    #: How long a participant may go without connecting before their remaining
+    #: WAITING songs are cleaned up as absent (M16, PRODUCT_SPEC §6.9/E2).
+    absent_participant_cleanup_seconds: int = 1800
 
 
 @lru_cache

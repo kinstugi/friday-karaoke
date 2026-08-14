@@ -434,6 +434,42 @@ EOF
   participant (auto-dismissed after 8s).
 - Covered by `backend/tests/test_playback.py` (4 notification tests).
 
+## Round cleanup + summaries verification (M16)
+
+Absent-participant cleanup and round summaries. Quick check from `backend/`:
+
+```bash
+uv run python - <<'EOF'
+import uuid, httpx
+BASE = "http://localhost:8000"
+email = f"sum-{uuid.uuid4().hex[:8]}@school.edu"
+c = httpx.Client(timeout=30)
+c.post(f"{BASE}/api/v1/auth/host/register", json={"email": email, "password": "correct-horse-battery"})
+host = c.post(f"{BASE}/api/v1/auth/host/login", json={"email": email, "password": "correct-horse-battery"}).json()["token"]
+hh = {"Authorization": f"Bearer {host}"}
+s = c.post(f"{BASE}/api/v1/sessions", json={}, headers=hh).json()
+sid, code = s["id"], s["join_code"]
+alice = c.post(f"{BASE}/api/v1/join/{code}/participants", json={"nickname": "Alice"}).json()["token"]
+for _ in range(2):
+    c.post(f"{BASE}/api/v1/sessions/{sid}/entries", json={"youtube_url": "https://youtu.be/dQw4w9WgXcQ"},
+           headers={"Authorization": f"Bearer {alice}"})
+snap = c.get(f"{BASE}/api/v1/sessions/{sid}/entries").json()
+print("participants:", snap["participants"], "| rounds_completed:", snap["rounds_completed"])
+summary = c.get(f"{BASE}/api/v1/sessions/{sid}/summary", headers=hh)
+print("summary:", summary.status_code, summary.json()["participants"])
+print("participant summary (expect 401):",
+      c.get(f"{BASE}/api/v1/sessions/{sid}/summary", headers={"Authorization": f"Bearer {alice}"}).status_code)
+EOF
+```
+
+- Absent-participant cleanup: a participant who hasn't connected to the realtime
+  channel for `KARAOKE_ABSENT_PARTICIPANT_CLEANUP_SECONDS` (default 30 min) has
+  their remaining `WAITING` songs cancelled when the snapshot is rendered (only
+  for started sessions; an absent `NEXT`/`SINGING` singer stays the host's skip
+  call). Covered by `backend/tests/test_rounds.py`.
+- The snapshot reports `rounds_completed` and per-participant `remaining_songs`;
+  the host-only `/sessions/{id}/summary` reports submitted/sung/remaining.
+
 ## Branch / commit workflow
 
 - Development happens on `dev`. Never commit directly to `master`.

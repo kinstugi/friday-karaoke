@@ -46,3 +46,9 @@ class Participant(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+    #: When the participant last connected to the realtime channel (M16). Set at
+    #: join and refreshed on each WebSocket connect; NULL means "never tracked"
+    #: (treated as present — never cleaned up).
+    last_connected_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
