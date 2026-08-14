@@ -5,7 +5,7 @@ Host-only controls that drive the playback state machine:
 - ``POST /play/start``    manually start the front of the queue (→ ``SINGING``)
 - ``POST /play/end``      the host device reports the video ended naturally (M13:
                           → ``COMPLETED``, then cooldown → countdown → auto-start)
-- ``POST /play/skip``     current singer → ``SKIPPED``, then the countdown (D20)
+- ``POST /play/skip``     move the current singer to the end of the round (D20; excluded only when they are the only one left)
 - ``POST /play/finish``   current singer → ``COMPLETED``, then the countdown (D20)
 - ``POST /play/advance``  progress an automatic transition whose phase deadline
                           passed (M13: COOLDOWN → COUNTDOWN → auto-start)
