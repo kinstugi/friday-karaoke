@@ -23,6 +23,17 @@ class SessionCreateRequest(BaseModel):
     countdown_seconds: int | None = Field(default=None, ge=0, le=3600)
 
 
+class ReorderRequest(BaseModel):
+    """Request body for ``PATCH /api/v1/sessions/{id}/order``.
+
+    The desired participant order for the **current round** (host reorder,
+    per-round; the next round resets to join order). Nicknames are unique per
+    session (B14/D16).
+    """
+
+    participant_names: list[str] = Field(min_length=1, max_length=50)
+
+
 class SessionResponse(BaseModel):
     """Host-facing view of a session."""
 

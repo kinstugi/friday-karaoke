@@ -10,6 +10,7 @@ from app.models.host_auth_token import HostAuthToken
 from app.models.participant import Participant
 from app.models.queue_entry import QueueEntry
 from app.models.round import Round
+from app.models.round_order import RoundOrder
 from app.models.session import Session
 from app.models.youtube_video import YouTubeVideo
 
@@ -20,6 +21,7 @@ __all__ = [
     "Participant",
     "QueueEntry",
     "Round",
+    "RoundOrder",
     "Session",
     "YouTubeVideo",
 ]

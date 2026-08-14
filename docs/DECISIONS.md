@@ -202,12 +202,18 @@ These freeze MVP product behavior. They were captured in `docs/PRODUCT_SPEC.md`.
 
 ### D20. Skip vs. manually advance
 
-- **Status:** Accepted
+- **Status:** Accepted (partly revised by the queue-revision note below)
 - **Decision:** "Skip" marks the current entry `SKIPPED` and advances immediately;
   "manually advance" marks it `COMPLETED` and advances immediately. Both bypass
   remaining automation. "Pause" holds automation after the current song.
 - **Rationale:** Gives the host two distinct, meaningful actions (singer cut short
   vs. singer done early) while keeping the state machine simple and explicit.
+- **Queue-revision note (post-M18):** "Skip" no longer marks the current entry
+  `SKIPPED`. It moves the singer to the **end of the current round** (a re-chance
+  for an absent singer; each further skip keeps them at the back); the singer is
+  marked `SKIPPED` only when they are the **only** non-terminal entry left in the
+  round, so the round can complete. "Finish"/manually advance still marks
+  `COMPLETED` and advances.
 
 ---
 
@@ -653,6 +659,16 @@ These freeze MVP product behavior. They were captured in `docs/PRODUCT_SPEC.md`.
   ordering within a round by that round's own submission times (unstable across
   rounds — a participant who submits their 2nd song late would suddenly move
   ahead/behind others in round 2).
+- **Queue-revision note (post-M18, real-pilot feedback):** the within-round
+  ordering was changed after live testing: it is now **join order** (earliest
+  join first, via `participants.created_at` with a microsecond Python default
+  for deterministic ties) instead of first-engagement. The host can **re-arrange
+  the current round** via `PATCH /api/v1/sessions/{id}/order` — per-round only
+  (a `round_orders` table; the next round resets to join order). **Skip moves
+  the singer to the end of the round** (`queue_entries.skip_count`; one
+  re-chance), and they are excluded only when they are the only non-terminal
+  entry left so the round can complete. The round-robin structure, derived
+  active round, and per-participant cap are unchanged.
 
 ## D44. Rounds auto-advance; no next-round enrollment
 

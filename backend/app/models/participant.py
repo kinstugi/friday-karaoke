@@ -11,7 +11,7 @@ feeds a portable (session_id, lowercased) unique constraint.
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import DateTime, ForeignKey, String, Uuid, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
@@ -43,8 +43,13 @@ class Participant(Base):
     token_hash: Mapped[str] = mapped_column(
         String(64), unique=True, index=True, nullable=False
     )
+    #: Python-side microsecond default keeps join order deterministic on SQLite
+    #: (whose ``CURRENT_TIMESTAMP`` is second-precision); ``id`` is the tie-break.
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        nullable=False,
     )
     #: When the participant last connected to the realtime channel (M16). Set at
     #: join and refreshed on each WebSocket connect; NULL means "never tracked"

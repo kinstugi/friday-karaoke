@@ -107,6 +107,8 @@ bcrypt-hashed. Emails are stored lowercase (case-insensitive uniqueness).
 | GET    | /api/v1/sessions           | host | List own sessions, newest first (M9) |
 | GET    | /api/v1/sessions/{id}      | host | Get session (owning host)     |
 | GET    | /api/v1/sessions/{id}/summary | host | Round/session summary (M16)  |
+| PATCH  | /api/v1/sessions/{id}/order  | host | Reorder the current round (per-round) |
+| DELETE | /api/v1/sessions/{id}/order  | host | Reset the current round to join order |
 | POST   | /api/v1/sessions/{id}/start| host | Start session (owning host)   |
 | POST   | /api/v1/sessions/{id}/end  | host | End session (owning host)     |
 | GET    | /api/v1/sessions/{id}/qr   | host | Join URL as SVG QR code (M5)  |
@@ -415,12 +417,28 @@ POST /api/v1/sessions/{id}/play/advance        # when the phase deadline passed
 409 { "detail": "no automatic transition in progress" }
 
 POST /api/v1/sessions/{id}/play/skip           # and /play/finish
-200 { ..., "playback_state": "COUNTDOWN", "queue": [ { ..., "status": "NEXT" } ] }
+200 { ..., "playback_state": "COUNTDOWN", "queue": [ { ..., "status": "NEXT" }, ... ] }
 409 { "detail": "no song is currently playing" }
 
 POST /api/v1/sessions/{id}/play/pause
 200 { ..., "status": "PAUSED", "playback_state": "IDLE", ... }
 409 { "detail": "session <id> cannot be paused from state CREATED" }
+
+POST /api/v1/sessions/{id}/play/resume
+200 { ..., "status": "ACTIVE", ... }
+409 { "detail": "session <id> cannot be resumed from state ACTIVE" }
+
+# Reorder the current round (queue revision: join order by default; the host
+# can re-arrange per round — the next round resets to join order).
+PATCH /api/v1/sessions/{id}/order               Authorization: Bearer <host token>
+{ "participant_names": ["Charlie", "Alice", "Bob"] }
+200 { ...QueueSnapshotResponse with the reordered queue... }
+422 { "detail": "unknown participant(s): Ghost" }   # / "participant names must be unique"
+422 { "detail": "the queue is empty — nothing to reorder" }
+404 { "detail": "session not found" }
+
+DELETE /api/v1/sessions/{id}/order               # back to join order
+200 { ...QueueSnapshotResponse... }
 ```
 
 The queue snapshot's `queue` entries carry their `SINGING`/`NEXT`/`WAITING`

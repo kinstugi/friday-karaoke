@@ -57,6 +57,9 @@ class QueueEntry(Base):
         server_default="WAITING",
         nullable=False,
     )
+    #: How many times this entry was skipped-and-moved to the end of its round
+    #: (queue revision): it sorts after entries that were never skipped.
+    skip_count: Mapped[int] = mapped_column(default=0, server_default="0", nullable=False)
     #: Creation order determines queue position (D8). A Python-side default
     #: with microsecond precision preserves insertion order on SQLite (whose
     #: ``CURRENT_TIMESTAMP`` is second-precision); ``id`` is the deterministic

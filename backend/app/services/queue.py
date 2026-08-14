@@ -1,24 +1,23 @@
-"""Queue management use-cases (M7; round-robin engine at M10.1).
+"""Queue management use-cases (M7; round-robin engine at M10.1; queue revision).
 
 The authoritative queue engine: submissions (with the per-participant song cap
 and duplicate notice), public snapshots of the current round with computed
 positions, participant cancellation, and host removal/URL editing.
 
 Since M10.1 (decisions D43–D45) the queue is **round-robin**: round N holds one
-song per participant (their N-th song); the active queue is the current round's
-non-terminal entries ordered by the **stable participant order** (each
-participant's earliest submission); the active round is derived (the
+song per participant (their N-th song); the active round is derived (the
 lowest-numbered round with a non-terminal entry) and advances automatically when
-it empties.
+it empties. Within a round the order is the **join order** (earliest join first)
+unless the host reorders the current round, and a skipped singer is moved to the
+end via ``skip_count`` (queue revision).
 """
 
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import case, func, select
+from sqlalchemy import case, delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased
 
 from app.core.config import get_settings
 from app.domain.playback import ensure_utc
@@ -27,6 +26,7 @@ from app.domain.session import SessionStatus
 from app.models.participant import Participant
 from app.models.queue_entry import QueueEntry
 from app.models.round import Round
+from app.models.round_order import RoundOrder
 from app.models.session import Session
 from app.models.youtube_video import YouTubeVideo
 from app.schemas.queue import QueueEntryResponse, QueueParticipant, QueueSnapshotResponse
@@ -48,6 +48,14 @@ class EntryNotFoundError(Exception):
 
 class EntryNotCancellableError(Exception):
     """Raised when a participant tries to cancel an entry that is not WAITING."""
+
+
+class InvalidOrderError(Exception):
+    """Raised when a reorder references unknown or duplicate nicknames."""
+
+
+class NoActiveRoundError(Exception):
+    """Raised when there is no active round to reorder (the queue is empty)."""
 
 
 class QueueService:
@@ -112,36 +120,43 @@ class QueueService:
         """Return the current round's non-terminal entries in queue order.
 
         The current round is the lowest-numbered round with a non-terminal entry
-        (derived, D43). Order is the stable participant order — each
-        participant's earliest submission time — with ``created_at``/``id`` as
-        the deterministic tie-break (D8/D36).
+        (derived, D43). Order within the round (queue revision):
+
+        - entries that were skipped-and-moved go last, by ``skip_count``;
+        - if the host reordered this round, the reorder positions win;
+        - otherwise the order is the **participant join order** (earliest join
+          first), with ``created_at``/``id`` as the deterministic tie-break.
+
+        Computed in the service (school-night scale) so the join-order and
+        reorder fallbacks stay dialect-portable (D22).
         """
         karaoke_round = await self._active_round(session, session_id)
         if karaoke_round is None:
             return []
-        outer = aliased(QueueEntry)
-        first_times = (
-            select(
-                QueueEntry.participant_id,
-                func.min(QueueEntry.created_at).label("first_at"),
-            )
-            .where(QueueEntry.session_id == session_id)
-            .group_by(QueueEntry.participant_id)
-            .subquery()
-        )
         result = await session.scalars(
-            select(outer)
-            .join(
-                first_times,
-                first_times.c.participant_id == outer.participant_id,
+            select(QueueEntry).where(
+                QueueEntry.round_id == karaoke_round.id,
+                QueueEntry.status.in_(QueueEntryStatus.non_terminal()),
             )
-            .where(
-                outer.round_id == karaoke_round.id,
-                outer.status.in_(QueueEntryStatus.non_terminal()),
-            )
-            .order_by(first_times.c.first_at, outer.created_at, outer.id)
         )
-        return list(result)
+        entries = list(result)
+        if not entries:
+            return []
+        join_index = await self._join_index_map(session, session_id)
+        reorder = await self._round_order_map(session, karaoke_round.id)
+        n_reordered = len(reorder) if reorder is not None else 0
+
+        def sort_key(entry: QueueEntry) -> tuple:
+            if reorder is not None and entry.participant_id in reorder:
+                base = reorder[entry.participant_id]
+            else:
+                # Late additions (or a reorder that didn't list everyone) sort
+                # after all reordered participants, then by join order.
+                base = n_reordered + join_index.get(entry.participant_id, n_reordered)
+            return (entry.skip_count, base, entry.created_at, entry.id)
+
+        entries.sort(key=sort_key)
+        return entries
 
     async def get_participant_entries(
         self, session: AsyncSession, participant: Participant
@@ -308,8 +323,8 @@ class QueueService:
     ) -> list[QueueParticipant]:
         """Per-participant remaining-song counts (M16).
 
-        Ordered by the stable participant order (earliest submission). Only
-        participants with at least one non-terminal entry appear.
+        Ordered by participant join order. Only participants with at least one
+        non-terminal entry appear.
         """
         rows = await session.execute(
             select(Participant.nickname, func.count(QueueEntry.id))
@@ -318,13 +333,72 @@ class QueueService:
                 QueueEntry.session_id == session_id,
                 QueueEntry.status.in_(QueueEntryStatus.non_terminal()),
             )
-            .group_by(Participant.id, Participant.nickname)
-            .order_by(func.min(QueueEntry.created_at), Participant.id)
+            .group_by(Participant.id, Participant.nickname, Participant.created_at)
+            .order_by(Participant.created_at, Participant.id)
         )
         return [
             QueueParticipant(nickname=nickname, remaining_songs=count)
             for nickname, count in rows
         ]
+
+    async def reorder(
+        self,
+        session: AsyncSession,
+        host_id: uuid.UUID,
+        session_id: uuid.UUID,
+        participant_names: list[str],
+    ) -> None:
+        """Set the host's manual order for the current round (queue revision).
+
+        Per-round only: ``round_orders`` records the lineup for the active
+        round; the next round (no rows) falls back to join order. Raises
+        ``InvalidOrderError`` for unknown or duplicate nicknames and
+        ``NoActiveRoundError`` when the queue is empty.
+        """
+        await session_service.get_for_host(session, host_id, session_id)
+        karaoke_round = await self._active_round(session, session_id)
+        if karaoke_round is None:
+            raise NoActiveRoundError("the queue is empty — nothing to reorder")
+        if len(set(participant_names)) != len(participant_names):
+            raise InvalidOrderError("participant names must be unique")
+        participants = await session.scalars(
+            select(Participant).where(
+                Participant.session_id == session_id,
+                Participant.nickname.in_(participant_names),
+            )
+        )
+        by_name = {participant.nickname: participant for participant in participants}
+        missing = [name for name in participant_names if name not in by_name]
+        if missing:
+            raise InvalidOrderError(
+                f"unknown participant(s): {', '.join(missing)}"
+            )
+        await session.execute(
+            delete(RoundOrder).where(RoundOrder.round_id == karaoke_round.id)
+        )
+        session.add_all(
+            [
+                RoundOrder(
+                    round_id=karaoke_round.id,
+                    position=index,
+                    participant_id=by_name[name].id,
+                )
+                for index, name in enumerate(participant_names)
+            ]
+        )
+        await session.commit()
+
+    async def reset_order(
+        self, session: AsyncSession, host_id: uuid.UUID, session_id: uuid.UUID
+    ) -> None:
+        """Clear the host's reorder for the current round (back to join order)."""
+        await session_service.get_for_host(session, host_id, session_id)
+        karaoke_round = await self._active_round(session, session_id)
+        if karaoke_round is not None:
+            await session.execute(
+                delete(RoundOrder).where(RoundOrder.round_id == karaoke_round.id)
+            )
+            await session.commit()
 
     async def session_summary(
         self, session: AsyncSession, session_id: uuid.UUID
@@ -357,8 +431,8 @@ class QueueService:
             )
             .join(QueueEntry, QueueEntry.participant_id == Participant.id)
             .where(QueueEntry.session_id == session_id)
-            .group_by(Participant.id, Participant.nickname)
-            .order_by(func.min(QueueEntry.created_at), Participant.id)
+            .group_by(Participant.id, Participant.nickname, Participant.created_at)
+            .order_by(Participant.created_at, Participant.id)
         )
         participants = [
             SessionParticipantSummary(
@@ -465,6 +539,29 @@ class QueueService:
         return entry
 
     # --- Round-robin internals --------------------------------------------------
+
+    async def _join_index_map(
+        self, session: AsyncSession, session_id: uuid.UUID
+    ) -> dict[uuid.UUID, int]:
+        """Map participant id -> join-order index (earliest join first)."""
+        participants = await session.scalars(
+            select(Participant)
+            .where(Participant.session_id == session_id)
+            .order_by(Participant.created_at, Participant.id)
+        )
+        return {participant.id: index for index, participant in enumerate(participants)}
+
+    async def _round_order_map(
+        self, session: AsyncSession, round_id: uuid.UUID
+    ) -> dict[uuid.UUID, int] | None:
+        """Map participant id -> reorder position for ``round_id``, or None."""
+        rows = await session.scalars(
+            select(RoundOrder)
+            .where(RoundOrder.round_id == round_id)
+            .order_by(RoundOrder.position)
+        )
+        mapping = {row.participant_id: row.position for row in rows}
+        return mapping if mapping else None
 
     async def _active_round(
         self, session: AsyncSession, session_id: uuid.UUID

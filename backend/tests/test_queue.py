@@ -394,7 +394,7 @@ def test_round_robin_order_and_auto_advance(
     assert [e["video_id"] for e in body["queue"]] == [VIDEO_B_ID, VIDEO_B_ID]
 
 
-def test_stable_order_repeats_across_rounds(
+def test_join_order_repeats_across_rounds(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _patch_youtube(
@@ -404,22 +404,39 @@ def test_stable_order_repeats_across_rounds(
     headers, session_body, p1 = _setup(client, nickname="P1")
     p2 = _join_participant(client, session_body, nickname="P2")
 
-    # P1 engages first, then P2.
+    # P1 joins first, then P2 — so P1 is first in every round regardless of
+    # submission order (queue revision: join order, not first-engagement).
     _submit(client, session_body["id"], p1, f"https://youtu.be/{VIDEO_A_ID}")
     _submit(client, session_body["id"], p2, f"https://youtu.be/{VIDEO_A_ID}")
-    # Round 2: P2 submits first this time, then P1.
+    # Round 2: P2 submits first this time, then P1 — order is still P1, P2.
     _submit(client, session_body["id"], p2, f"https://youtu.be/{VIDEO_B_ID}")
     _submit(client, session_body["id"], p1, f"https://youtu.be/{VIDEO_B_ID}")
 
     round_one = _snapshot(client, session_body["id"]).json()
     assert [e["participant_name"] for e in round_one["queue"]] == ["P1", "P2"]
 
-    # Exhaust round 1 -> round 2 must still be P1 then P2 (stable order).
+    # Exhaust round 1 -> round 2 is still P1 then P2 (join order).
     for entry in round_one["queue"]:
         client.delete(f"{ENTRIES_URL}/{entry['id']}", headers=headers)
     round_two = _snapshot(client, session_body["id"]).json()
     assert round_two["round_number"] == 2
     assert [e["participant_name"] for e in round_two["queue"]] == ["P1", "P2"]
+
+
+def test_join_order_beats_submission_order(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The queue revision orders by JOIN time: P2 joined first but P1 submitted
+    his round-1 song first, yet P2 still sings before P1."""
+    _patch_youtube(monkeypatch, {VIDEO_A_ID: _video_a()})
+    headers, session_body, p2 = _setup(client, nickname="P2")  # P2 joins first
+    p1 = _join_participant(client, session_body, nickname="P1")  # P1 joins second
+    _submit(client, session_body["id"], p1, f"https://youtu.be/{VIDEO_A_ID}")
+    _submit(client, session_body["id"], p2, f"https://youtu.be/{VIDEO_A_ID}")
+
+    body = _snapshot(client, session_body["id"]).json()
+    # Join order wins: P2 (joined first) sings before P1 (submitted first).
+    assert [e["participant_name"] for e in body["queue"]] == ["P2", "P1"]
 
 
 def test_late_joiner_appends_to_current_round(

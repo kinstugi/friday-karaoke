@@ -113,10 +113,36 @@ class PlaybackService:
     async def skip(
         self, session: AsyncSession, host_id: uuid.UUID, session_id: uuid.UUID
     ) -> QueueEntry:
-        """Skip the current singer (``SKIPPED``) and begin the countdown (D20/M13)."""
-        return await self._advance(
-            session, host_id, session_id, QueueEntryStatus.SKIPPED
-        )
+        """Move the current singer to the end of the round (queue revision).
+
+        The singer gets one re-chance after everyone else: the entry returns to
+        ``WAITING`` with ``skip_count`` incremented (so it sorts last). If the
+        singer is the **only** non-terminal entry left in the round, they are
+        excluded (``SKIPPED``) so the round can complete. Either way the next
+        singer is promoted and the countdown transition begins (no cooldown —
+        host intervention, D20).
+        """
+        karaoke = await self._require_playable(session, host_id, session_id)
+        current = await self._current_singer(session, session_id)
+        if current is None:
+            raise NothingPlayingError("no song is currently playing")
+        active = await queue_service.get_active_entries(session, session_id)
+        if len(active) <= 1:
+            # The only singer left: skipping must exclude them or the round
+            # would never complete.
+            current.status = QueueEntryStatus.SKIPPED
+            current.ended_at = datetime.now(timezone.utc)
+        else:
+            # Move to the end of the round (one re-chance).
+            current.skip_count += 1
+            current.status = QueueEntryStatus.WAITING
+            current.started_at = None
+            current.ended_at = None
+        await session.commit()
+        await self._promote_next(session, session_id)
+        await self._begin_transition(session, karaoke, skip_cooldown=True)
+        await session.commit()
+        return current
 
     async def finish(
         self, session: AsyncSession, host_id: uuid.UUID, session_id: uuid.UUID

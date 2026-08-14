@@ -26,13 +26,19 @@ from app.core.database import get_session
 from app.models.host import Host
 from app.models.session import Session
 from app.realtime.hub import realtime_hub
-from app.schemas.realtime import SessionUpdatedEvent
+from app.schemas.queue import QueueSnapshotResponse
+from app.schemas.realtime import QueueUpdatedEvent, SessionUpdatedEvent
 from app.schemas.session import (
+    ReorderRequest,
     SessionCreateRequest,
     SessionResponse,
     SessionSummaryResponse,
 )
-from app.services.queue import queue_service
+from app.services.queue import (
+    InvalidOrderError,
+    NoActiveRoundError,
+    queue_service,
+)
 from app.services.session import (
     InvalidSessionTransitionError,
     SessionNotFoundError,
@@ -134,6 +140,53 @@ async def session_summary(
     except SessionNotFoundError as exc:
         raise _not_found() from exc
     return await queue_service.session_summary(session, session_id)
+
+
+@router.patch("/{session_id}/order", response_model=QueueSnapshotResponse)
+async def reorder_session(
+    session_id: uuid.UUID,
+    payload: ReorderRequest,
+    current_host: Annotated[Host, Depends(get_current_host)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> QueueSnapshotResponse:
+    """Set the host's manual order for the current round (per-round reorder).
+
+    The next round resets to join order. Returns the updated snapshot and
+    broadcasts ``QueueUpdated``.
+    """
+    try:
+        await queue_service.reorder(
+            session, current_host.id, session_id, payload.participant_names
+        )
+    except SessionNotFoundError as exc:
+        raise _not_found() from exc
+    except (InvalidOrderError, NoActiveRoundError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    snapshot = await queue_service.snapshot(session, session_id)
+    await realtime_hub.broadcast(
+        session_id, QueueUpdatedEvent(session_id=session_id, snapshot=snapshot)
+    )
+    return snapshot
+
+
+@router.delete("/{session_id}/order", response_model=QueueSnapshotResponse)
+async def reset_session_order(
+    session_id: uuid.UUID,
+    current_host: Annotated[Host, Depends(get_current_host)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> QueueSnapshotResponse:
+    """Clear the current round's reorder (back to join order)."""
+    try:
+        await queue_service.reset_order(session, current_host.id, session_id)
+    except SessionNotFoundError as exc:
+        raise _not_found() from exc
+    snapshot = await queue_service.snapshot(session, session_id)
+    await realtime_hub.broadcast(
+        session_id, QueueUpdatedEvent(session_id=session_id, snapshot=snapshot)
+    )
+    return snapshot
 
 
 @router.post("/{session_id}/start", response_model=SessionResponse)

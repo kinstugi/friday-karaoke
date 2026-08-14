@@ -11,9 +11,21 @@ of every milestone. The persistent context lives in `PROJECT_BRAIN.md`.
 
 ## Current task
 
-None (milestone finished). Next milestone: **M19 — PWA + mobile UX** (web
-manifest, installable PWA, service worker, offline/reconnect handling — where the
-deferred Web Push can also land).
+**Queue-model revision (post-M18, from real-pilot feedback) — IMPLEMENTED + locally verified, NOT deployed.**
+
+The queue now orders each round by **join order** (earliest join first, via
+`participants.created_at` with a microsecond Python default), the host can
+**re-order the current round** (`PATCH/DELETE /api/v1/sessions/{id}/order`,
+per-round via a `round_orders` table — the next round resets to join order), and
+**skip moves the singer to the end of the round** (`queue_entries.skip_count`,
+one re-chance; excluded only when they are the only non-terminal entry left).
+Migration `0008_queue_ordering` applied locally; suite **256 passed**; pyright 0;
+frontend up/down + reset controls on the dashboard; local live smoke verified
+join-order-wins, reorder, skip-to-end, and reset. **Deployment to Cloud Run is
+deferred until the user has tested locally.** Decisions D43/D20 carry revision
+notes. Next milestone: **M19 — PWA + mobile UX** (web manifest, installable PWA,
+service worker, offline/reconnect handling — where the deferred Web Push can also
+land).
 
 ## M18 scope (plan.md §M18)
 

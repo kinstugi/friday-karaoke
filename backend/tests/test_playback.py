@@ -204,7 +204,7 @@ def test_start_twice_conflicts(
 # --- skip / finish ---------------------------------------------------------------
 
 
-def test_skip_marks_skipped_and_promotes_next(
+def test_skip_moves_singer_to_end_and_promotes_next(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _patch_youtube(
@@ -222,14 +222,17 @@ def test_skip_marks_skipped_and_promotes_next(
     response = _play(client, session_body["id"], headers, "skip")
     assert response.status_code == 200, response.text
     body = response.json()
-    # M13: skip begins the automatic transition — the next singer's countdown
-    # (the post-song cooldown is skipped on host intervention, D20).
+    # Queue revision: the skipped singer is moved to the END of the round (one
+    # re-chance), the next singer is promoted, and the countdown begins (no
+    # cooldown on host intervention, D20).
     assert body["playback_state"] == "COUNTDOWN"
     assert body["transition_remaining_seconds"] is not None
-    assert body["transition_remaining_seconds"] > 0
     statuses = [e["status"] for e in body["queue"]]
-    assert statuses == ["NEXT"]
-    assert body["queue"][0]["id"] != singing_id  # the next singer is now NEXT
+    assert statuses == ["NEXT", "WAITING"]
+    assert body["queue"][0]["participant_name"] == "Bob"
+    # The skipped entry (Alice) is now last, still WAITING for a re-chance.
+    assert body["queue"][-1]["id"] == singing_id
+    assert body["queue"][-1]["participant_name"] == "Alice"
 
 
 def test_finish_marks_completed_and_promotes_next(
@@ -381,6 +384,42 @@ def test_skip_broadcasts_singer_skipped(
         events = {ws.receive_json()["type"], ws.receive_json()["type"]}
         assert "SingerSkipped" in events
         assert "QueueUpdated" in events
+
+
+async def test_skip_only_singer_excludes_them_and_completes_round(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    session: AsyncSession,
+) -> None:
+    _patch_youtube(
+        monkeypatch,
+        {VIDEO_A_ID: _video(VIDEO_A_ID, "Song A"), VIDEO_B_ID: _video(VIDEO_B_ID, "Song B")},
+    )
+    headers, session_body, alice = _setup(client)
+    bob = _join(client, session_body, "Bob")
+    _submit(client, session_body["id"], alice, VIDEO_A_ID)
+    _submit(client, session_body["id"], bob, VIDEO_B_ID)
+    started = _play(client, session_body["id"], headers, "start")
+    singing_id = started.json()["queue"][0]["id"]
+
+    # The host removes Bob's song, leaving Alice as the only singer.
+    snapshot = _snapshot(client, session_body["id"])
+    bob_entry = next(e for e in snapshot["queue"] if e["participant_name"] == "Bob")
+    removed = client.delete(f"{ENTRIES_URL}/{bob_entry['id']}", headers=headers)
+    assert removed.status_code == 204, removed.text
+
+    # Skipping the only singer excludes them so the round can complete.
+    response = _play(client, session_body["id"], headers, "skip")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["playback_state"] == "IDLE"
+    assert body["queue"] == []
+
+    stored = await session.scalar(
+        select(QueueEntry).where(QueueEntry.id == uuid.UUID(singing_id))
+    )
+    assert stored is not None
+    assert stored.status is QueueEntryStatus.SKIPPED
 
 
 # --- Automatic transitions (M13) ---------------------------------------------------

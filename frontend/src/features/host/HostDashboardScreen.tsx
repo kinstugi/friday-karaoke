@@ -20,6 +20,8 @@ import {
   fetchSessionQr,
   finishPlayback,
   pausePlayback,
+  reorderSession,
+  resetSessionOrder,
   resumePlayback,
   skipPlayback,
   startPlayback,
@@ -246,6 +248,40 @@ export default function HostDashboardScreen() {
     }
   }
 
+  // Per-round reorder (queue revision): move a participant up/down within the
+  // current round. The backend returns the authoritative snapshot.
+  async function handleReorder(index: number, direction: 'up' | 'down') {
+    if (!identity || busy || !snapshot) return
+    const swap = direction === 'up' ? index - 1 : index + 1
+    if (swap < 0 || swap >= snapshot.queue.length) return
+    const names = snapshot.queue.map((e) => e.participant_name)
+    ;[names[index], names[swap]] = [names[swap], names[index]]
+    setBusy(`order:${index}`)
+    setError(null)
+    try {
+      const updated = await reorderSession(identity.token, sessionId, names)
+      setSnapshot(updated)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not reorder the queue')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function handleResetOrder() {
+    if (!identity || busy) return
+    setBusy('order:reset')
+    setError(null)
+    try {
+      const updated = await resetSessionOrder(identity.token, sessionId)
+      setSnapshot(updated)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not reset the queue order')
+    } finally {
+      setBusy(null)
+    }
+  }
+
   function beginEdit(entry: QueueEntry) {
     setEditingId(entry.id)
     setEditUrl(entry.youtube_url)
@@ -440,22 +476,40 @@ export default function HostDashboardScreen() {
           </section>
 
           <section className="host-queue">
-            <h2>
-              Queue
-              {snapshot
-                ? ` · Round ${snapshot.round_number}${snapshot.rounds_completed > 0 ? ` (${snapshot.rounds_completed} completed)` : ''}`
-                : ''}
-            </h2>
+            <div className="row queue-head">
+              <h2>
+                Queue
+                {snapshot
+                  ? ` · Round ${snapshot.round_number}${snapshot.rounds_completed > 0 ? ` (${snapshot.rounds_completed} completed)` : ''}`
+                  : ''}
+              </h2>
+              <button
+                className="ghost"
+                onClick={() => void handleResetOrder()}
+                disabled={busy !== null}
+                title="Back to join order for this round"
+              >
+                Reset to join order
+              </button>
+            </div>
             {snapshot === null ? (
               <p className="muted">Loading queue…</p>
             ) : snapshot.queue.length === 0 ? (
               <p className="muted">No songs yet — waiting for singers.</p>
             ) : (
               <ol className="queue-list">
-                {snapshot.queue.map((entry) => {
+                {snapshot.queue.map((entry, index) => {
                   const editing = editingId === entry.id
                   const moreSongs =
                     (remainingByNickname.get(entry.participant_name) ?? 0) - 1
+                  const isSinging = entry.status === 'SINGING'
+                  // The current singer is fixed: you cannot move them, nor swap
+                  // a neighbor through their position.
+                  const aboveIsSinging =
+                    index > 0 && snapshot.queue[index - 1].status === 'SINGING'
+                  const belowIsSinging =
+                    index < snapshot.queue.length - 1 &&
+                    snapshot.queue[index + 1].status === 'SINGING'
                   return (
                     <li key={entry.id}>
                       <span className="position">{entry.position ?? '—'}</span>
@@ -493,6 +547,39 @@ export default function HostDashboardScreen() {
                       </div>
                       {!editing ? (
                         <div className="row entry-actions">
+                          <button
+                            className="ghost"
+                            aria-label={`Move ${entry.participant_name} up`}
+                            onClick={() => void handleReorder(index, 'up')}
+                            disabled={
+                              busy !== null || isSinging || index === 0 || aboveIsSinging
+                            }
+                            title={
+                              isSinging
+                                ? 'The current singer is fixed'
+                                : 'Move up in this round'
+                            }
+                          >
+                            ↑
+                          </button>
+                          <button
+                            className="ghost"
+                            aria-label={`Move ${entry.participant_name} down`}
+                            onClick={() => void handleReorder(index, 'down')}
+                            disabled={
+                              busy !== null ||
+                              isSinging ||
+                              index === snapshot.queue.length - 1 ||
+                              belowIsSinging
+                            }
+                            title={
+                              isSinging
+                                ? 'The current singer is fixed'
+                                : 'Move down in this round'
+                            }
+                          >
+                            ↓
+                          </button>
                           <button
                             className="ghost"
                             onClick={() => beginEdit(entry)}

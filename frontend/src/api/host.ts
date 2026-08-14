@@ -59,6 +59,31 @@ export function fetchSessionSummary(
   })
 }
 
+/** Set the host's manual order for the current round (per-round; the next
+ *  round resets to join order). Returns the updated snapshot. */
+export function reorderSession(
+  token: string,
+  sessionId: string,
+  participantNames: string[],
+): Promise<QueueSnapshot> {
+  return apiRequest<QueueSnapshot>(`${SESSIONS_BASE}/${sessionId}/order`, {
+    method: 'PATCH',
+    body: { participant_names: participantNames },
+    token,
+  })
+}
+
+/** Clear the current round's reorder (back to join order). */
+export function resetSessionOrder(
+  token: string,
+  sessionId: string,
+): Promise<QueueSnapshot> {
+  return apiRequest<QueueSnapshot>(`${SESSIONS_BASE}/${sessionId}/order`, {
+    method: 'DELETE',
+    token,
+  })
+}
+
 export function startSession(token: string, sessionId: string): Promise<Session> {
   return apiRequest<Session>(`${SESSIONS_BASE}/${sessionId}/start`, {
     method: 'POST',

@@ -101,11 +101,16 @@ Round N active
 
 ### Queue ordering
 
-- **Within a round**: queue order is the **stable participant order** — the order
-  in which participants first engaged (their earliest submission), fixed once and
-  repeated in every round. A participant who joins mid-round is appended to the
-  current round and keeps that (later) position in future rounds. The backend
-  derives positions from this order; there is no mutable position field.
+- **Within a round**: the default order is the **join order** — the order in
+  which participants joined the session (earliest join first), repeated every
+  round. The host can **re-arrange the current round** (up/down on the
+  dashboard); the reorder is **per-round only** — the next round falls back to
+  join order.
+- **Skipping an absent singer moves them to the end of the round** (one
+  re-chance after everyone else). If the skipped singer is the **only**
+  non-terminal entry left in the round, they are excluded (`SKIPPED`) so the
+  round can complete. In the next round they are back at the front (join
+  order).
 - **Between rounds**: round N+1 is simply each participant's next song. There is
   **no enrollment** and no "join the next round" step; a participant whose songs
   run out simply does not appear in later rounds.
@@ -401,9 +406,9 @@ Every edge case lists the **behavior** an implementer must produce.
 - **B6.** Long videos produce a warning, never automatic rejection.
   (`plan.md` §5 rule 9; `plan.md` §1.5)
 - **B7.** Queue order is authoritative backend state: the active queue is the
-  current round's entries, one song per participant, in **stable participant
-  order** (earliest first engagement), with no mutable position field.
-  (`plan.md` §5 rule 10; decisions D8/D43)
+  current round's entries, one song per participant, in **join order** (earliest
+  join first) unless the host reorders the current round, with no mutable
+  position field. (`plan.md` §5 rule 10; decisions D8/D43)
 - **B8.** Host playback is authoritative for actual song playback. Participant
   devices never play audio. (`plan.md` §5 rule 11; §1.6)
 - **B9.** Automatic advancement is a fallback/normal path that the host can always
@@ -430,8 +435,11 @@ Every edge case lists the **behavior** an implementer must produce.
   block. (Decision D15)
 - **B17.** Sessions are not tied to a live browser connection; closing the host
   browser does not end the session. (Decision D18)
-- **B18.** "Skip" marks the current entry `SKIPPED`; "manually advance" marks it
-  `COMPLETED`. Both advance to the next entry immediately. (Decision D20)
+- **B18.** "Skip" moves the current singer to the **end of the round** (one
+  re-chance); if they are the only singer left, it marks them `SKIPPED` so the
+  round can complete. "Manually advance" (`Finish`) marks the current entry
+  `COMPLETED` and advances immediately. Both begin the next singer's countdown.
+  (Decision D20)
 - **B19.** At most one non-terminal entry per participant per round. A new song
   goes to the **current round** when the participant has no non-terminal entry
   there, otherwise to the **next round above their highest round**.
