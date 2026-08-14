@@ -483,10 +483,15 @@ Interruptions (all valid at any point):
 MVP scope: **in-app notifications** (delivered via the realtime channel and visible
 in the participant queue screen; optionally a browser notification where permitted).
 
+> Implementation status: M15 delivers the in-app notifications (a typed
+> `NextSingerNotified` realtime event rendered as a banner on the participant
+> queue screen). Web Push is deferred (needs the M19 service worker + VAPID
+> credentials).
+
 - **"You're next"**: shown when the participant's entry is promoted to `NEXT` and
   again at countdown start (timing configurable, §10).
 - Message: `You're next! Get ready: <song> — <channel>`.
-- Web Push is a **later** milestone (M15) and is not part of the M1 contract.
+- Web Push is a **later** milestone and is not part of the MVP contract.
 
 ## 12. Non-goals (MVP)
 

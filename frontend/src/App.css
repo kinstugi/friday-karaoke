@@ -452,6 +452,13 @@ button.link-button {
   margin-top: 0.5rem;
 }
 
+/* --- In-app notification banner (M15) ---------------------------------------- */
+
+.notify {
+  border-color: var(--primary);
+  background: var(--surface-2);
+}
+
 /* --- Home (session list) ------------------------------------------------- */
 
 .home-list li {

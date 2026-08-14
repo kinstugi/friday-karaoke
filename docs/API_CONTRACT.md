@@ -431,19 +431,30 @@ Events are typed domain events (delivery only, never authoritative):
 QueueUpdated       payload: { type, session_id, snapshot: QueueSnapshotResponse }
 ParticipantJoined  payload: { type, session_id, nickname }
 SessionUpdated     payload: { type, session_id, status }
+SingerStarted      payload: { type, session_id, entry_id, participant_name, title }
+SingerFinished     payload: { type, session_id, entry_id }
+SingerSkipped      payload: { type, session_id, entry_id }
+NextSingerNotified payload: { type, session_id, entry_id, participant_name,
+                              title, channel, phase: "next" | "countdown" }   (M15)
 ```
 
 `QueueUpdated` carries the full authoritative queue snapshot (the same shape
 the REST `GET /sessions/{id}/entries` returns) so every subscriber renders the
-same state. It is emitted after submit, participant cancel, host remove, and
-host edit. `ParticipantJoined` fires when someone registers in the session;
-`SessionUpdated` fires when the host starts/ends the session.
+same state. It is emitted after submit, participant cancel, host remove, host
+edit, and every playback transition. `ParticipantJoined` fires when someone
+registers in the session; `SessionUpdated` fires when the host starts/ends/
+pauses/resumes the session.
 
-The other events in the original target list (`SingerStarted`, `SingerFinished`,
-`SingerSkipped`, `ParticipantRemoved`, `RoundStarted`, `RoundCompleted`,
-`SessionPaused`, `SessionResumed`) are not emitted. Round advances are visible
-through `round_number` in the `QueueUpdated` snapshot (M10.1 — no dedicated
-round event); singer events arrive at M11/M13 and pause/resume at M14.
+`NextSingerNotified` is the in-app "you're next" notification (M15,
+PRODUCT_SPEC §11): phase `next` when an entry is promoted to `NEXT`, phase
+`countdown` when the countdown transition begins. It is broadcast to every
+subscriber; the participant's device filters on `participant_name`. Web Push is
+deferred (needs the M19 service worker + VAPID credentials).
+
+The other events in the original target list (`RoundStarted`, `RoundCompleted`,
+`SessionPaused`, `SessionResumed`, `ParticipantRemoved`) are not emitted. Round
+advances are visible through `round_number` in the `QueueUpdated` snapshot
+(M10.1); singer events arrive at M11/M13 and pause/resume at M14.
 
 Rules:
 

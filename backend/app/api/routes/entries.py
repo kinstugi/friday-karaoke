@@ -52,6 +52,7 @@ from app.services.queue import (
     queue_service,
 )
 from app.services.playback import playback_service
+from app.api.routes.playback import _notify_next_singer
 from app.services.session import SessionNotFoundError, session_service
 from app.services.youtube import (
     YouTubeServiceConfigurationError,
@@ -236,6 +237,7 @@ async def delete_entry(
     (E6/M14): the host recovers from a bad live song without database access.
     """
     try:
+        was_singing = False
         if isinstance(actor, Participant):
             entry = await queue_service.cancel(session, actor, entry_id)
         else:
@@ -252,13 +254,19 @@ async def delete_entry(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail=str(exc)
         ) from exc
+    snapshot = await queue_service.snapshot(session, entry.session_id)
     await realtime_hub.broadcast(
         entry.session_id,
         QueueUpdatedEvent(
             session_id=entry.session_id,
-            snapshot=await queue_service.snapshot(session, entry.session_id),
+            snapshot=snapshot,
         ),
     )
+    if was_singing:
+        # M15: removing the current singer promoted the next entry to NEXT and
+        # began the countdown (E6) — notify the next singer (both phases).
+        await _notify_next_singer(entry.session_id, snapshot, "next")
+        await _notify_next_singer(entry.session_id, snapshot, "countdown")
 
 
 @entry_router.patch("/{entry_id}/video", response_model=QueueEntryResponse)

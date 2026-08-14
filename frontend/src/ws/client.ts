@@ -45,6 +45,16 @@ export interface SingerSkippedEvent {
   entry_id: string
 }
 
+export interface NextSingerNotifiedEvent {
+  type: 'NextSingerNotified'
+  session_id: string
+  entry_id: string
+  participant_name: string
+  title: string
+  channel: string
+  phase: 'next' | 'countdown'
+}
+
 export type RealtimeEvent =
   | QueueUpdatedEvent
   | ParticipantJoinedEvent
@@ -52,6 +62,7 @@ export type RealtimeEvent =
   | SingerStartedEvent
   | SingerFinishedEvent
   | SingerSkippedEvent
+  | NextSingerNotifiedEvent
 
 /** Build the WebSocket URL for a session, carrying the bearer token as a
  *  query parameter (the browser WebSocket API cannot set request headers). */
@@ -71,6 +82,7 @@ export function parseRealtimeEvent(raw: string): RealtimeEvent | null {
       'SingerStarted',
       'SingerFinished',
       'SingerSkipped',
+      'NextSingerNotified',
     ]
     if (!known.includes(parsed.type)) return null
     return parsed

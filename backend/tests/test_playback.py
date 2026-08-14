@@ -606,14 +606,130 @@ def test_advance_broadcasts_singer_started_on_auto_start(
         ws.receive_json()
         ws.receive_json()
         _play(client, session_body["id"], headers, "end")  # -> COUNTDOWN (cooldown 0)
-        events = {ws.receive_json()["type"], ws.receive_json()["type"]}
-        assert events == {"SingerFinished", "QueueUpdated"}
+        # end emits: SingerFinished + QueueUpdated + NextSingerNotified(next)
+        # + NextSingerNotified(countdown) since the countdown starts immediately.
+        events = {ws.receive_json()["type"] for _ in range(4)}
+        assert {"SingerFinished", "QueueUpdated", "NextSingerNotified"} <= events
 
         response = _play(client, session_body["id"], headers, "advance")
         assert response.status_code == 200, response.text
         events = {ws.receive_json()["type"], ws.receive_json()["type"]}
         assert "SingerStarted" in events
         assert "QueueUpdated" in events
+
+
+# --- Next-singer notifications (M15) ----------------------------------------------
+
+
+def _drain_events(ws, count: int) -> list[dict]:
+    return [ws.receive_json() for _ in range(count)]
+
+
+def _notifications(events: list[dict]) -> list[dict]:
+    return [e for e in events if e["type"] == "NextSingerNotified"]
+
+
+def test_end_broadcasts_next_singer_notification(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_youtube(monkeypatch, {VIDEO_A_ID: _video(VIDEO_A_ID, "Song A")})
+    headers, session_body, alice = _setup_with_timings(client, 10, 20, monkeypatch)
+    bob = _join(client, session_body, "Bob")
+    _submit(client, session_body["id"], alice, VIDEO_A_ID)
+    _submit(client, session_body["id"], bob, VIDEO_A_ID)
+    host_token = headers["Authorization"].split(" ", maxsplit=1)[1]
+
+    with client.websocket_connect(
+        WS_URL.format(session_id=session_body["id"]) + f"?token={host_token}"
+    ) as ws:
+        _play(client, session_body["id"], headers, "start")
+        _drain_events(ws, 2)  # SingerStarted + QueueUpdated
+
+        _play(client, session_body["id"], headers, "end")  # -> COOLDOWN
+        events = _drain_events(ws, 3)  # SingerFinished + QueueUpdated + notify
+        notifications = _notifications(events)
+        assert len(notifications) == 1
+        notify = notifications[0]
+        assert notify["phase"] == "next"
+        assert notify["participant_name"] == "Bob"
+        assert notify["title"] == "Song A"
+
+
+def test_finish_broadcasts_next_singer_notification_both_phases(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_youtube(monkeypatch, {VIDEO_A_ID: _video(VIDEO_A_ID, "Song A")})
+    headers, session_body, alice = _setup_with_timings(client, 10, 20, monkeypatch)
+    bob = _join(client, session_body, "Bob")
+    _submit(client, session_body["id"], alice, VIDEO_A_ID)
+    _submit(client, session_body["id"], bob, VIDEO_A_ID)
+    host_token = headers["Authorization"].split(" ", maxsplit=1)[1]
+
+    with client.websocket_connect(
+        WS_URL.format(session_id=session_body["id"]) + f"?token={host_token}"
+    ) as ws:
+        _play(client, session_body["id"], headers, "start")
+        _drain_events(ws, 2)
+
+        # finish -> COUNTDOWN immediately (no cooldown): notify both phases.
+        _play(client, session_body["id"], headers, "finish")
+        events = _drain_events(ws, 4)
+        phases = {n["phase"] for n in _notifications(events)}
+        assert phases == {"next", "countdown"}
+        assert all(n["participant_name"] == "Bob" for n in _notifications(events))
+
+
+def test_advance_to_countdown_broadcasts_notification(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_youtube(monkeypatch, {VIDEO_A_ID: _video(VIDEO_A_ID, "Song A")})
+    headers, session_body, alice = _setup_with_timings(client, 10, 5, monkeypatch)
+    bob = _join(client, session_body, "Bob")
+    _submit(client, session_body["id"], alice, VIDEO_A_ID)
+    _submit(client, session_body["id"], bob, VIDEO_A_ID)
+    host_token = headers["Authorization"].split(" ", maxsplit=1)[1]
+
+    with client.websocket_connect(
+        WS_URL.format(session_id=session_body["id"]) + f"?token={host_token}"
+    ) as ws:
+        _play(client, session_body["id"], headers, "start")
+        _drain_events(ws, 2)
+        _play(client, session_body["id"], headers, "end")  # -> COOLDOWN
+        _drain_events(ws, 3)  # SingerFinished + QueueUpdated + notify(next)
+
+        # Past the cooldown deadline: COOLDOWN -> COUNTDOWN = countdown-start.
+        _FrozenDatetime.advance(11)
+        _play(client, session_body["id"], headers, "advance")
+        events = _drain_events(ws, 2)  # QueueUpdated + notify(countdown)
+        notifications = _notifications(events)
+        assert len(notifications) == 1
+        assert notifications[0]["phase"] == "countdown"
+        assert notifications[0]["participant_name"] == "Bob"
+
+
+def test_remove_singer_broadcasts_notification(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_youtube(monkeypatch, {VIDEO_A_ID: _video(VIDEO_A_ID, "Song A")})
+    headers, session_body, alice = _setup_with_timings(client, 10, 20, monkeypatch)
+    bob = _join(client, session_body, "Bob")
+    _submit(client, session_body["id"], alice, VIDEO_A_ID)
+    _submit(client, session_body["id"], bob, VIDEO_A_ID)
+    host_token = headers["Authorization"].split(" ", maxsplit=1)[1]
+
+    with client.websocket_connect(
+        WS_URL.format(session_id=session_body["id"]) + f"?token={host_token}"
+    ) as ws:
+        started = _play(client, session_body["id"], headers, "start")
+        _drain_events(ws, 2)
+        singing_id = started.json()["queue"][0]["id"]
+
+        removed = client.delete(f"{ENTRIES_URL}/{singing_id}", headers=headers)
+        assert removed.status_code == 204, removed.text
+        events = _drain_events(ws, 3)  # QueueUpdated + notify(next) + notify(countdown)
+        phases = {n["phase"] for n in _notifications(events)}
+        assert phases == {"next", "countdown"}
+        assert all(n["participant_name"] == "Bob" for n in _notifications(events))
 
 
 # --- Host moderation (M14) --------------------------------------------------------

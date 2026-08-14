@@ -275,7 +275,12 @@ get correct state from the API.
   (promote next → `NEXT` → countdown transition, E6), removing an already-
   terminal entry is a no-op (E21); skip/finish/pause/resume/edit/end all wired
   from earlier milestones.
-- **M15–M16** — notifications + round lifecycle cleanup + summaries.
+- **M15** — next-singer notifications (complete): a typed `NextSingerNotified`
+  realtime event (phase `next`/`countdown`, PRODUCT_SPEC §11) is broadcast when
+  an entry is promoted to `NEXT` and when the countdown begins; the participant
+  queue screen renders a filtered auto-dismissing banner. Web Push deferred to
+  the PWA milestone (M19).
+- **M16** — round lifecycle cleanup + summaries.
 - **M17–M19** — security, testing, PWA/mobile UX.
 - **M20–M22** — deployment, pilot, fixes.
 

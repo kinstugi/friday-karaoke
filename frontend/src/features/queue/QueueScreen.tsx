@@ -3,7 +3,7 @@
 // queue with the participant's own entries highlighted. The backend is the source
 // of truth — this screen only renders what it returns. While the WebSocket is
 // disconnected it falls back to polling the authoritative snapshot (D5/B13).
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, Navigate, useParams } from 'react-router-dom'
 
 import { cancelEntry, fetchMyEntries, fetchQueueSnapshot } from '../../api/entries'
@@ -15,6 +15,8 @@ import { useTransitionRemaining } from '../../lib/transition'
 import { useRealtime } from '../../ws/useRealtime'
 
 const POLL_INTERVAL_MS = 5000
+//: How long an in-app "you're next" banner stays visible (M15).
+const NOTIFICATION_MS = 8000
 
 export default function QueueScreen() {
   const { joinCode = '' } = useParams()
@@ -26,6 +28,21 @@ export default function QueueScreen() {
   const [mySongs, setMySongs] = useState<QueueEntry[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [connected, setConnected] = useState(false)
+  const [notification, setNotification] = useState<string | null>(null)
+  const notifyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const showNotification = useCallback((message: string) => {
+    setNotification(message)
+    if (notifyTimerRef.current !== null) clearTimeout(notifyTimerRef.current)
+    notifyTimerRef.current = setTimeout(() => setNotification(null), NOTIFICATION_MS)
+  }, [])
+
+  useEffect(
+    () => () => {
+      if (notifyTimerRef.current !== null) clearTimeout(notifyTimerRef.current)
+    },
+    [],
+  )
 
   const refresh = useCallback(async () => {
     if (!identity) return
@@ -78,6 +95,15 @@ export default function QueueScreen() {
         setSnapshot((prev) =>
           prev ? { ...prev, status: event.status } : prev,
         )
+      } else if (event.type === 'NextSingerNotified') {
+        // M15 in-app notification: only for the participant it concerns.
+        if (identity && event.participant_name === identity.nickname) {
+          showNotification(
+            event.phase === 'next'
+              ? `🎤 You're next! Get ready: ${event.title} — ${event.channel}`
+              : `🎤 Starting soon! ${event.title} — ${event.channel}`,
+          )
+        }
       }
     },
     onStatusChange: (isConnected) => {
@@ -130,6 +156,12 @@ export default function QueueScreen() {
         <span className="session-name">{identity.sessionName}</span>
         <Link to={`/join/${joinCode}/submit`}>+ Add Song</Link>
       </header>
+
+      {notification ? (
+        <div className="card notify" role="status">
+          <strong>{notification}</strong>
+        </div>
+      ) : null}
 
       <div className="row">
         <p className={`badge badge-${snapshot.status.toLowerCase()}`}>

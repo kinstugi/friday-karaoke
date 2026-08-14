@@ -1,4 +1,4 @@
-"""Typed realtime event payloads (M10; singer events at M11).
+"""Typed realtime event payloads (M10; singer events M11; notifications M15).
 
 WebSockets are a delivery mechanism, not the source of truth (decision D5):
 the backend broadcasts these events to a session's subscribers after a domain
@@ -6,24 +6,25 @@ change, and a reconnecting client must re-fetch authoritative state from the
 REST API. Event payloads carry typed fields only — never free-form strings
 (API_CONTRACT §8).
 
-M10/M11 emit the events that correspond to domain changes that already exist:
+Emitted events correspond to domain changes that already exist:
 - ``QueueUpdated``       queue mutated (submit, cancel, remove, edit, playback
                          status changes) — the payload is the full authoritative
                          queue snapshot
 - ``ParticipantJoined``  a new participant registered in the session
-- ``SessionUpdated``     session status changed (started/ended today; paused/
-                         resumed from M11)
-- ``SingerStarted``      the host started playing an entry (M11)
-- ``SingerFinished``     the host finished an entry (M11)
-- ``SingerSkipped``      the host skipped an entry (M11)
+- ``SessionUpdated``     session status changed (started/ended; paused/resumed)
+- ``SingerStarted``      the host started an entry (M11)
+- ``SingerFinished``     an entry completed (M11)
+- ``SingerSkipped``      an entry was skipped (M11)
+- ``NextSingerNotified`` the next singer was notified (M15, in-app): phase
+                         ``next`` when their entry is promoted to ``NEXT`` and
+                         phase ``countdown`` when the countdown transition begins
 
-The other events listed in API_CONTRACT §8 (RoundStarted, SessionPaused, …) are
-not emitted: round advances are visible via ``round_number`` in the snapshot
-(M10.1), and automatic-transition states land with M13.
+Web Push (out-of-band notifications) is deferred: M15 is in-app only (see
+DECISIONS open question).
 """
 
 import uuid
-from typing import Union
+from typing import Literal, Union
 
 from pydantic import BaseModel
 
@@ -85,6 +86,24 @@ class SingerSkippedEvent(BaseModel):
     entry_id: uuid.UUID
 
 
+class NextSingerNotifiedEvent(BaseModel):
+    """In-app notification for the next singer (M15, PRODUCT_SPEC §11).
+
+    Phase ``next`` fires when the participant's entry is promoted to ``NEXT``
+    (the previous song ended); phase ``countdown`` fires when the countdown
+    transition begins (~``countdown_seconds`` before their song). Delivered to
+    every subscriber; the participant's device filters on ``participant_name``.
+    """
+
+    type: str = "NextSingerNotified"
+    session_id: uuid.UUID
+    entry_id: uuid.UUID
+    participant_name: str
+    title: str
+    channel: str
+    phase: Literal["next", "countdown"]
+
+
 #: The union of events the hub may deliver (typed, discriminated by ``type``).
 RealtimeEvent = Union[
     QueueUpdatedEvent,
@@ -93,4 +112,5 @@ RealtimeEvent = Union[
     SingerStartedEvent,
     SingerFinishedEvent,
     SingerSkippedEvent,
+    NextSingerNotifiedEvent,
 ]

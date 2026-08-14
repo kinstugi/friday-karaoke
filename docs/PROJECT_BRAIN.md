@@ -171,11 +171,18 @@ song cap, sessions not tied to a browser) are in `docs/PRODUCT_SPEC.md` §8–§
 
 ## 8. Current milestone
 
-**M15 — Next-singer notifications** (next; backend + frontend). M14 is complete;
-see `docs/DEV_BRAIN.md` for live status.
+**M16 — Round lifecycle cleanup + summaries** (next; backend + frontend). M15 is
+complete; see `docs/DEV_BRAIN.md` for live status.
 
 ## 9. Completed milestones
 
+- **M15 — Next-singer notifications** (complete, backend + frontend): a typed
+  `NextSingerNotified` realtime event (phase `next` on `NEXT` promotion, phase
+  `countdown` at countdown start) delivers in-app "you're next!" notifications;
+  the participant queue screen renders a filtered, auto-dismissing banner
+  (PRODUCT_SPEC §11). Web Push deferred to the PWA milestone (M19) — the Web
+  Push open question is resolved. 4 new tests (suite 216); pyright 0; live smoke
+  confirmed Bob's device received both phases.
 - **M14 — Host moderation + manual controls** (complete, backend): the host's
   full authority surface is live (PRODUCT_SPEC §5.5): Remove + Edit (M7),
   Skip/Finish/Pause/Resume (M11/M13), End session (M4). M14 closes the last
@@ -321,9 +328,9 @@ see `docs/DEV_BRAIN.md` for live status.
 
 ## 10. Known limitations
 
-- Song transitions are automatic (M13) but there are no **notifications** yet:
-  the next singer isn't pushed a "you're next" alert beyond the on-screen
-  countdown (M15). Round/session summaries land in M16.
+- **Web Push is not implemented** (M15 = in-app notifications only); out-of-band
+  "you're next" alerts need the M19 service worker + VAPID credentials.
+  Round/session summaries and absent-participant cleanup land in M16.
 - YouTube playback is only exercisable in a real browser (autoplay policies,
   audio output); automated checks cover the build and the backend contract.
 - Realtime (M10) delivers only the events whose producers exist: `QueueUpdated`

@@ -763,4 +763,8 @@ These freeze MVP product behavior. They were captured in `docs/PRODUCT_SPEC.md`.
   YouTube Data API v3 (D33).**
 - ~~Exact realtime payload schemas~~ — **M10 resolved: typed per-event models
   (`app/schemas/realtime.py`), discriminated by `type` (D42).**
-- Web Push service choice — M15.
+- ~~Web Push service choice~~ — **M15 resolved: M15 is in-app notifications only
+  (a typed `NextSingerNotified` realtime event, PRODUCT_SPEC §11). Web Push
+  (service worker + VAPID push subscription) is deferred — it needs a service
+  worker (PWA, M19) and out-of-band credentials, which the school pilot does not
+  require: participants watch the queue screen live.**

@@ -392,6 +392,48 @@ curl http://localhost:8000/api/v1/sessions/<id>/entries
   already-terminal entry is a no-op (E21).
 - Covered by `backend/tests/test_playback.py` (4 moderation tests).
 
+## Next-singer notifications verification (M15)
+
+In-app "you're next" notifications are delivered over the realtime channel. Quick
+check from `backend/` (needs a YouTube key in `backend/.env`):
+
+```bash
+uv run python - <<'EOF'
+import json, time, uuid, httpx
+from websockets.sync.client import connect
+BASE = "http://localhost:8000"; WS = "ws://localhost:8000"
+email = f"ntf-{uuid.uuid4().hex[:8]}@school.edu"
+c = httpx.Client(timeout=30)
+c.post(f"{BASE}/api/v1/auth/host/register", json={"email": email, "password": "correct-horse-battery"})
+host = c.post(f"{BASE}/api/v1/auth/host/login", json={"email": email, "password": "correct-horse-battery"}).json()["token"]
+hh = {"Authorization": f"Bearer {host}"}
+s = c.post(f"{BASE}/api/v1/sessions", json={"cooldown_seconds": 1, "countdown_seconds": 1}, headers=hh).json()
+sid, code = s["id"], s["join_code"]
+alice = c.post(f"{BASE}/api/v1/join/{code}/participants", json={"nickname": "Alice"}).json()["token"]
+bob = c.post(f"{BASE}/api/v1/join/{code}/participants", json={"nickname": "Bob"}).json()["token"]
+for t in (alice, bob):
+    c.post(f"{BASE}/api/v1/sessions/{sid}/entries", json={"youtube_url": "https://youtu.be/dQw4w9WgXcQ"},
+           headers={"Authorization": f"Bearer {t}"})
+with connect(f"{WS}/api/v1/sessions/{sid}/ws?token={bob}") as ws:
+    c.post(f"{BASE}/api/v1/sessions/{sid}/play/start", headers=hh)
+    c.post(f"{BASE}/api/v1/sessions/{sid}/play/end", headers=hh)   # -> COOLDOWN
+    deadline = time.time() + 6
+    while time.time() < deadline:
+        try:
+            ev = json.loads(ws.recv(timeout=2))
+        except Exception:
+            break
+        if ev["type"] == "NextSingerNotified":
+            print("notify:", ev["phase"], ev["participant_name"], ev["title"][:20])
+EOF
+```
+
+- Bob's device receives `NextSingerNotified` phase `next` when his entry becomes
+  the next singer, and phase `countdown` when the countdown starts; the
+  participant queue screen shows a "🎤 You're next!" banner filtered to the
+  participant (auto-dismissed after 8s).
+- Covered by `backend/tests/test_playback.py` (4 notification tests).
+
 ## Branch / commit workflow
 
 - Development happens on `dev`. Never commit directly to `master`.

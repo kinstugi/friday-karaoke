@@ -7,82 +7,83 @@ of every milestone. The persistent context lives in `PROJECT_BRAIN.md`.
 
 ## Current milestone
 
-**M14 — Host moderation + manual controls** — COMPLETE (verified).
+**M15 — Next-singer notifications** — COMPLETE (verified).
 
 ## Current task
 
-None (milestone finished). Next milestone: **M15 — Next-singer notifications**
-("You're next!" when an entry is promoted to `NEXT` and again at countdown
-start — riding the M13 automatic transitions).
+None (milestone finished). Next milestone: **M16 — Round lifecycle cleanup +
+summaries** (absent-participant cleanup, round/session summaries for the host).
 
-## M14 scope (plan.md §M14)
+## M15 scope (plan.md §M15)
 
-Make the host the final authority (PRODUCT_SPEC §5.5/§9). Most controls landed in
-earlier milestones; M14 closes the remaining gap: **removing the current singer
-advances playback** (E6/E5), so the host can recover from a bad live song
-without database access, and removes of already-terminal entries are no-ops
-(E21).
+- In-app "you're next" notifications delivered over the realtime channel and
+  rendered on the participant queue screen (PRODUCT_SPEC §11): when an entry is
+  promoted to `NEXT` and again at countdown start (timing configurable, §10).
+- Web Push is **deferred** (needs the M19 service worker + VAPID credentials) —
+  the school pilot's participants watch the queue screen live, so in-app is the
+  MVP notification (DECISIONS open question resolved).
 
-## Verification results (M14 acceptance criteria, plan.md §M14)
+## Verification results (M15 acceptance criteria, plan.md §M15)
 
-| Criterion | Result |
-| --------- | ------ |
-| Host can recover from bad submissions without database access (Remove / Edit) | Verified — Remove: `DELETE /api/v1/entries/{id}`; **removing the current `SINGING` entry advances playback** (promotes the next to `NEXT` and begins the countdown transition, E6); Edit: `PATCH .../video` re-validates + re-fetches metadata and preserves the position (E7). Live smoke confirmed both |
-| Skip / manual advance / pause / resume | Verified — already live since M11/M13 (`play/skip`, `play/finish` = manual advance, `play/pause`, `play/resume`); skip/finish skip the cooldown and begin the countdown (D20) |
-| Removing an already-terminal entry is a no-op (E21) | Verified — `QueueService.remove` returns the entry unchanged (status preserved, e.g. `CANCELLED` not overwritten by `REMOVED`); `test_remove_terminal_entry_is_noop` |
+| Acceptance criterion | Result |
+| -------------------- | ------ |
+| The next participant receives a clear notification | Verified — a typed `NextSingerNotified` event (payload: entry, participant, title, channel, phase) is broadcast on `NEXT` promotion (phase `next`) and on countdown start (phase `countdown`); the participant queue screen renders a "🎤 You're next! Get ready: <song> — <channel>" banner filtered to the participant's nickname, auto-dismissed after 8s |
+| Notification timing is configurable | Verified — the countdown-start notification rides the per-session `countdown_seconds` (M13); the `next` phase fires when the previous song ends |
+| In-app first, then Web Push | Verified — Web Push explicitly deferred and documented (DECISIONS open question resolved) |
 
 Additional verification:
 
-- Backend suite: **212 passed** (208 prior + 4 new moderation tests), `pyright`
+- Backend suite: **216 passed** (212 prior + 4 new notification tests), `pyright`
   0 errors.
-- Frontend unchanged (the dashboard's Remove button already re-syncs via the
-  realtime channel; the player stops and the countdown shows automatically):
-  typecheck/lint/build still pass.
-- Live smoke against real PostgreSQL + real YouTube metadata: start → PLAYING;
-  remove the current singer → 204 → snapshot `COUNTDOWN` with the next entry
-  `NEXT`; edit the NEXT entry's URL → 200 with re-fetched metadata, position
-  preserved.
+- Frontend: `npm run typecheck`, `npm run lint`, `npm run build` all pass.
+- Live smoke against real PostgreSQL + real YouTube metadata: Alice's song ends
+  → Bob's participant WebSocket received `NextSingerNotified` phase `next`
+  ("Rick Astley - Never…"); after the cooldown, `play/advance` → phase
+  `countdown`. The event is broadcast to all subscribers and filtered
+  client-side on the participant's nickname.
 
-## Files changed (M14)
+## Files changed (M15)
 
 ```text
-backend/app/services/queue.py         (remove returns (entry, was_singing); idempotent for
-                                       terminal entries, E21)
-backend/app/services/playback.py      (on_singer_removed: advance playback after the current
-                                       singer is removed, E6; skips cooldown like skip/finish,
-                                       D20; no-op on ended sessions)
-backend/app/api/routes/entries.py     (delete_entry host branch calls on_singer_removed when
-                                       the removed entry was SINGING)
-backend/tests/test_playback.py        (4 new moderation tests + the terminal-noop test)
+backend/app/schemas/realtime.py      (NextSingerNotifiedEvent + union; docstring)
+backend/app/api/routes/playback.py   (_notify_next_singer helper; end/skip/finish/advance
+                                      broadcast the notification)
+backend/app/api/routes/entries.py    (host removal of the current singer also notifies
+                                      the next singer)
+backend/tests/test_playback.py       (4 notification WS tests; the M13 auto-start test
+                                      updated for the extra end events)
+frontend/src/ws/client.ts            (NextSingerNotifiedEvent type + parse)
+frontend/src/features/queue/QueueScreen.tsx (banner: filter by nickname, auto-dismiss 8s)
+frontend/src/App.css                 (.notify banner style)
 docs/PROJECT_BRAIN.md, docs/ARCHITECTURE.md, docs/DEV_BRAIN.md, docs/API_CONTRACT.md,
-docs/RUNBOOK.md
+docs/RUNBOOK.md, docs/DECISIONS.md (Web Push open question resolved), docs/PRODUCT_SPEC.md (§11)
 ```
 
-## Implementation notes (M14)
+## Implementation notes (M15)
 
-- **Remove advances playback (E6):** `QueueService.remove` now returns
-  `(entry, was_singing)`; when the removed entry was the current `SINGING`
-  singer, the route calls `PlaybackService.on_singer_removed`, which promotes
-  the new front to `NEXT` and begins the countdown transition (a host
-  intervention skips the cooldown, D20). If nothing remains, playback returns
-  to `IDLE`. On an ended session (cleanup) there is no playback to advance.
-  Removing the `NEXT` entry mid-countdown self-heals: `advance` promotes
-  whichever entry is now the front.
-- **E21 no-op:** removing an already-terminal entry returns it unchanged
-  (e.g. the participant cancelled it first → stays `CANCELLED`), and the
-  `was_singing` flag is `False`, so no playback advance happens.
-- **No frontend change needed:** the dashboard's Remove button drives the same
-  DELETE endpoint; the realtime `QueueUpdated` snapshot then shows the new
-  playback state (transition) and the player stops via the `nowSinging` ref.
-- **No scope creep:** no notifications (M15), no round summaries (M16), no new
-  dependencies, no schema change.
+- **Delivery:** a typed `NextSingerNotifiedEvent` is broadcast to every
+  subscriber of the session (the hub is not per-participant targeted); the
+  participant queue screen filters on `participant_name === identity.nickname`.
+  The event is delivery-only (D5): the banner is ephemeral UI and the
+  authoritative state remains the snapshot.
+- **Moments:** phase `next` fires on `NEXT` promotion (the previous song ended /
+  host skip / host finish / host removal of the singer); phase `countdown` fires
+  when the countdown transition begins (immediately on skip/finish/removal, or
+  after the cooldown via `play/advance`). With a cooldown, the two phases are
+  ~`cooldown_seconds` apart; without one they arrive together (the banner simply
+  shows the latest message).
+- **Frontend:** the banner auto-dismisses after 8 s (timer cleared on a new
+  notification and on unmount); the Up-next card's live countdown (M13) remains
+  the persistent "starts in Ns" display.
+- **No scope creep:** no Web Push/service worker/VAPID (deferred to the PWA
+  milestone), no new dependencies, no schema change.
 
-## Tests added (M14)
+## Tests added (M15)
 
-- `tests/test_playback.py` (4): remove current singer advances playback
-  (COUNTDOWN + next NEXT); remove current singer when it's the only entry →
-  IDLE; remove the NEXT entry mid-countdown self-heals (advance starts the new
-  front); removing an already-terminal entry is a no-op (status preserved, E21).
+- `tests/test_playback.py` (4): `end` broadcasts `next`; `finish` broadcasts
+  both `next` + `countdown`; `advance` (cooldown → countdown) broadcasts
+  `countdown`; host removal of the singer broadcasts both phases. The M13
+  auto-start WS test was updated for the additional `end` events.
 
 ## Current blockers
 
@@ -90,19 +91,20 @@ docs/RUNBOOK.md
 
 ## Unresolved technical questions
 
-- Tracked in `docs/DECISIONS.md` (Open questions): Web Push service choice (M15).
 - Starlette deprecation warning (`httpx` vs `httpx2` in `fastapi.testclient`) —
   non-blocking, tracked since M0.
 - FastAPI 0.141.1 dependency-name collision (D30): workaround documented; watch
   for an upstream fix.
 - `RealtimeHub` is in-process/per-worker (D42): a multi-worker deployment needs
   a shared hub (Redis) — tracked for M20 deployment.
+- Web Push (service worker + VAPID) is deferred from M15 to the PWA milestone
+  (M19) — documented in DECISIONS.
 
 ## Next recommended task
 
-**M15 — Next-singer notifications**: in-app "You're next!" notifications
-(PRODUCT_SPEC §11) delivered over the realtime channel when an entry is promoted
-to `NEXT` and again at countdown start. The M13 countdown already drives the
-promotions, so this milestone surfaces them: a notification payload on the
-`QueueUpdated`/singer events (or a dedicated event) that the participant queue
-screen renders, plus the configurable timing from PRODUCT_SPEC §10.
+**M16 — Round lifecycle cleanup + summaries** (backend + frontend): the revised
+milestone from M10.1 — absent-participant cleanup (a disconnected/absent
+participant should not silently keep future-round slots forever), and round/
+session summaries surfaced to the host (rounds played, per-participant song
+counts, remaining lists). The round-robin engine and automatic transitions are
+already live (M10.1/M13); this milestone completes the round concept.
