@@ -226,7 +226,23 @@ class PlaybackService:
         post-song cooldown (D20). If no entry remains, playback returns to
         ``IDLE``. On an ended session (cleanup) there is no playback to advance.
         """
-        karaoke = await session_service.get_for_host(session, host_id, session_id)
+        await session_service.get_for_host(session, host_id, session_id)
+        await self._advance_after_singer_terminal(session, session_id)
+
+    async def advance_after_singer_removed(
+        self, session: AsyncSession, session_id: uuid.UUID
+    ) -> None:
+        """Advance playback after the current singer left the session (E6).
+
+        Same behavior as ``on_singer_removed`` but for a participant leaving:
+        no host ownership check (the caller already bound the participant).
+        """
+        await self._advance_after_singer_terminal(session, session_id)
+
+    async def _advance_after_singer_terminal(
+        self, session: AsyncSession, session_id: uuid.UUID
+    ) -> None:
+        karaoke = await session_service.get_by_id(session, session_id)
         if karaoke.status is SessionStatus.ENDED:
             return
         await self._promote_next(session, session_id)

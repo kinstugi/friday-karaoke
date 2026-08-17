@@ -233,6 +233,16 @@ Round N active
    night (no enrollment to rejoin; they could re-join via a new nickname if the
    host permits, but the session itself does not re-ask).
 
+### 6.10 Leave the session (going home early)
+1. A participant who has to leave taps **Leave session** and confirms.
+2. They are removed entirely: their identity and **all their songs** (current
+   round, future rounds, and sung history) are deleted, and their **nickname is
+   freed** so they could rejoin later (a rejoin is a fresh identity).
+3. If their song is currently playing, it stops and the **next singer advances**
+   (the same behavior as the host removing a singer, E6).
+4. Their token stops working immediately; everyone else's queue updates in
+   realtime.
+
 ## 7. Screen inventory (UX requirements)
 
 ### 7.1 Participant: join screen
@@ -389,6 +399,12 @@ Every edge case lists the **behavior** an implementer must produce.
   every participant's earlier songs are done. Submissions beyond the per-participant
   cap (B15) are rejected with a clear message. See §4.
 
+### E26. Participant leaves the session mid-night
+- Behavior: the participant taps Leave; their identity and all their songs are
+  deleted, their nickname is freed, and if they were the current singer playback
+  advances to the next singer (E6). Their token stops working immediately. The
+  queue updates for everyone in realtime.
+
 ## 9. Behavioral rules (implementer-facing)
 
 > These are the normative rules extracted from the flows and edge cases. Every rule
@@ -444,6 +460,10 @@ Every edge case lists the **behavior** an implementer must produce.
   goes to the **current round** when the participant has no non-terminal entry
   there, otherwise to the **next round above their highest round**.
   (Decision D43)
+- **B20.** A participant may delete themselves from the session (`POST
+  /sessions/{id}/leave`): their identity and all their songs are removed, their
+  nickname is freed, and if they were the current singer playback advances to
+  the next singer (E6). Their token stops working immediately.
 
 ## 10. Playback and automation behavior
 

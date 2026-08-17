@@ -20,10 +20,14 @@ import segno
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import get_current_host
+from app.api.dependencies import (
+    get_current_host,
+    get_current_participant,
+)
 from app.core.config import get_settings
 from app.core.database import get_session
 from app.models.host import Host
+from app.models.participant import Participant
 from app.models.session import Session
 from app.realtime.hub import realtime_hub
 from app.schemas.queue import QueueSnapshotResponse
@@ -34,6 +38,8 @@ from app.schemas.session import (
     SessionResponse,
     SessionSummaryResponse,
 )
+from app.services.participant import participant_service
+from app.services.playback import playback_service
 from app.services.queue import (
     InvalidOrderError,
     NoActiveRoundError,
@@ -187,6 +193,35 @@ async def reset_session_order(
         session_id, QueueUpdatedEvent(session_id=session_id, snapshot=snapshot)
     )
     return snapshot
+
+
+@router.post(
+    "/{session_id}/leave", status_code=status.HTTP_204_NO_CONTENT
+)
+async def leave_session(
+    session_id: uuid.UUID,
+    participant: Annotated[Participant, Depends(get_current_participant)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> None:
+    """Delete the participant and all their songs (leaving the night early).
+
+    The participant's nickname is freed (a rejoin is a fresh identity) and their
+    token dies with the row. If they were the current ``SINGING`` singer,
+    playback advances to the next singer (E6). The queue updates for everyone
+    via ``QueueUpdated``.
+    """
+    if participant.session_id != session_id:
+        raise _not_found()
+    was_singing = await participant_service.leave(session, participant)
+    if was_singing:
+        await playback_service.advance_after_singer_removed(session, session_id)
+    await realtime_hub.broadcast(
+        session_id,
+        QueueUpdatedEvent(
+            session_id=session_id,
+            snapshot=await queue_service.snapshot(session, session_id),
+        ),
+    )
 
 
 @router.post("/{session_id}/start", response_model=SessionResponse)

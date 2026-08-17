@@ -14,8 +14,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import generate_auth_token, hash_auth_token
+from app.domain.queue_entry import QueueEntryStatus
 from app.domain.session import SessionStatus
 from app.models.participant import Participant
+from app.models.queue_entry import QueueEntry
 from app.models.session import Session
 from app.schemas.participant import MAX_NICKNAME_LENGTH, MIN_NICKNAME_LENGTH
 from app.services.session import SessionNotFoundError
@@ -125,6 +127,28 @@ class ParticipantService:
             raise NicknameTakenError(display_nickname) from exc
         await session.refresh(participant)
         return participant, raw_token
+
+    async def leave(self, session: AsyncSession, participant: Participant) -> bool:
+        """Delete the participant and all their songs (leave the night early).
+
+        The ``participants`` row is deleted; ``ON DELETE CASCADE`` removes their
+        queue entries (every round) and any reorder rows, so they never appear
+        in later rounds and their nickname is freed (a rejoin is a fresh
+        identity). Returns whether they were the current ``SINGING`` singer so
+        the caller can advance playback (E6).
+        """
+        was_singing = (
+            await session.scalar(
+                select(QueueEntry.id).where(
+                    QueueEntry.participant_id == participant.id,
+                    QueueEntry.status == QueueEntryStatus.SINGING,
+                )
+            )
+            is not None
+        )
+        await session.delete(participant)
+        await session.commit()
+        return was_singing
 
 
 participant_service = ParticipantService()

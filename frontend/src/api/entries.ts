@@ -40,6 +40,15 @@ export function fetchMyEntries(
   })
 }
 
+/** Delete the participant + all their songs (leave the night early). Their
+ *  nickname is freed and their token dies; the queue updates for everyone. */
+export function leaveSession(sessionId: string, token: string): Promise<void> {
+  return apiRequest<void>(`/api/v1/sessions/${sessionId}/leave`, {
+    method: 'POST',
+    token,
+  })
+}
+
 export function cancelEntry(entryId: string, token: string): Promise<void> {
   return apiRequest<void>(`/api/v1/entries/${entryId}`, {
     method: 'DELETE',

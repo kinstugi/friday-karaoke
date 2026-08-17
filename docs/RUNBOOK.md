@@ -392,6 +392,22 @@ curl http://localhost:8000/api/v1/sessions/<id>/entries
   already-terminal entry is a no-op (E21).
 - Covered by `backend/tests/test_playback.py` (4 moderation tests).
 
+## Leave session (participant)
+
+A participant who has to leave deletes themselves and all their songs; their
+nickname is freed and their token dies; if they were the current singer playback
+advances (E6). Quick check from `backend/`:
+
+```bash
+# (participant token + session id)
+curl -X POST http://localhost:8000/api/v1/sessions/<session_id>/leave \
+  -H "Authorization: Bearer <participant_token>"      # 204
+curl http://localhost:8000/api/v1/sessions/<session_id>/entries
+# -> the participant and their songs are gone
+```
+
+- Covered by `backend/tests/test_leave.py` (8 tests).
+
 ## Next-singer notifications verification (M15)
 
 In-app "you're next" notifications are delivered over the realtime channel. Quick

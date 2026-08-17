@@ -4,13 +4,13 @@
 // of truth — this screen only renders what it returns. While the WebSocket is
 // disconnected it falls back to polling the authoritative snapshot (D5/B13).
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link, Navigate, useParams } from 'react-router-dom'
+import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
 
-import { cancelEntry, fetchMyEntries, fetchQueueSnapshot } from '../../api/entries'
+import { cancelEntry, fetchMyEntries, fetchQueueSnapshot, leaveSession } from '../../api/entries'
 import type { QueueEntry, QueueSnapshot } from '../../api/types'
 import { formatDuration } from '../../lib/format'
 import { statusLabel } from '../../lib/session'
-import { loadIdentity } from '../../lib/token'
+import { clearIdentity, loadIdentity } from '../../lib/token'
 import { useTransitionRemaining } from '../../lib/transition'
 import { useRealtime } from '../../ws/useRealtime'
 
@@ -20,6 +20,7 @@ const NOTIFICATION_MS = 8000
 
 export default function QueueScreen() {
   const { joinCode = '' } = useParams()
+  const navigate = useNavigate()
   // Read the stored identity once so its reference (and thus the polling
   // effect below) stays stable across renders (avoids a fetch loop).
   const [identity] = useState(loadIdentity)
@@ -127,6 +128,20 @@ export default function QueueScreen() {
       await refresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not cancel the entry')
+    }
+  }
+
+  async function handleLeave() {
+    if (!identity) return
+    if (!window.confirm('Leave this karaoke session? Your songs will be removed.')) {
+      return
+    }
+    try {
+      await leaveSession(identity.sessionId, identity.token)
+      clearIdentity()
+      navigate(`/join/${joinCode}`, { replace: true })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not leave the session')
     }
   }
 
@@ -263,6 +278,12 @@ export default function QueueScreen() {
           ) : null}
 
           {error ? <p className="error-text">{error}</p> : null}
+
+          <p className="leave-session">
+            <button className="link-button" onClick={() => void handleLeave()}>
+              Leave session
+            </button>
+          </p>
         </>
       )}
     </div>

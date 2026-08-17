@@ -837,6 +837,35 @@ These freeze MVP product behavior. They were captured in `docs/PRODUCT_SPEC.md`.
 
 ---
 
+## Leave-session decision
+
+## D50. Participant leave = hard delete (nickname freed, mid-song advances)
+
+- **Status:** Accepted
+- **Decision:** A participant can delete themselves from a session via
+  `POST /api/v1/sessions/{id}/leave` (participant token, session-bound). The
+  `participants` row is deleted and the existing `ON DELETE CASCADE`
+  relationships remove all their queue entries (every round) and any reorder
+  rows, so they never appear in later rounds and their **nickname is freed** (a
+  later rejoin is a fresh identity with a new token). If they were the current
+  `SINGING` singer, playback advances to the next singer (same E6 path as the
+  host removing a singer). The token dies with the row, so all further
+  participant actions return 401 naturally.
+- **Rationale:** "Going home early" should be a clean, final exit. Hard-deleting
+  is the simplest mechanism (no departed-flag, no extra blocking logic — a dead
+  token is automatically rejected) and naturally frees the nickname per the
+  product request. SQLite's foreign-key cascade is enabled for the test suite via
+  `PRAGMA foreign_keys=ON` so tests exercise the same cascade PostgreSQL has.
+- **Trade-off (accepted):** deleting the row also removes a leaver's already-sung
+  songs from the session summary stats. The alternative (a departed flag that
+  preserves history but keeps the nickname taken) is more code for little value
+  on a school night.
+- **Rejected:** keeping a `departed_at` flag (more code; doesn't free the
+  nickname); revoking the token in a separate table (a live delete already makes
+  the token unresolvable).
+
+---
+
 ## Open questions (tracked)
 
 - ~~Authentication mechanism for hosts (email/password vs. school SSO)~~ — **M3

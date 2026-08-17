@@ -459,6 +459,12 @@ button.link-button {
   background: var(--surface-2);
 }
 
+/* --- Leave session (participant) ---------------------------------------------- */
+
+.leave-session {
+  margin-top: var(--space-5);
+}
+
 /* --- Home (session list) ------------------------------------------------- */
 
 .home-list li {

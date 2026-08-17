@@ -11,21 +11,17 @@ of every milestone. The persistent context lives in `PROJECT_BRAIN.md`.
 
 ## Current task
 
-**Queue-model revision (post-M18, from real-pilot feedback) — IMPLEMENTED + locally verified, NOT deployed.**
+**Participant "leave session" feature (D50) — IMPLEMENTED + locally verified, pending deploy.**
 
-The queue now orders each round by **join order** (earliest join first, via
-`participants.created_at` with a microsecond Python default), the host can
-**re-order the current round** (`PATCH/DELETE /api/v1/sessions/{id}/order`,
-per-round via a `round_orders` table — the next round resets to join order), and
-**skip moves the singer to the end of the round** (`queue_entries.skip_count`,
-one re-chance; excluded only when they are the only non-terminal entry left).
-Migration `0008_queue_ordering` applied locally; suite **256 passed**; pyright 0;
-frontend up/down + reset controls on the dashboard; local live smoke verified
-join-order-wins, reorder, skip-to-end, and reset. **Deployment to Cloud Run is
-deferred until the user has tested locally.** Decisions D43/D20 carry revision
-notes. Next milestone: **M19 — PWA + mobile UX** (web manifest, installable PWA,
-service worker, offline/reconnect handling — where the deferred Web Push can also
-land).
+A participant can delete themselves from the session (`POST /api/v1/sessions/{id}/leave`):
+their identity and all their songs are removed via the DB cascade (nickname freed,
+token dies, absent from future rounds), and if they were the current singer playback
+advances (E6). The participant queue screen has a "Leave session" button. SQLite's
+foreign-key cascade is now enabled in the test engine (`PRAGMA foreign_keys=ON`) so
+the suite exercises the same cascade PostgreSQL has. Suite **264 passed**; pyright 0;
+frontend green; local smoke verified deletion + nickname reuse. **Cloud Run deployment
+pending.** The queue revision (join order / skip-to-end / per-round reorder) is already
+deployed. Decisions D43/D20/D50 carry notes. Next milestone: **M19 — PWA + mobile UX**.
 
 ## M18 scope (plan.md §M18)
 

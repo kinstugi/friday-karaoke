@@ -8,7 +8,7 @@ database to be reachable; failures surface on first use (e.g. the
 
 from collections.abc import AsyncIterator
 
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -24,10 +24,21 @@ def build_engine(database_url: str) -> AsyncEngine:
     """Build an async engine for a database URL.
 
     SQLite (used by the test suite) needs a static pool so every session
-    shares the same in-memory database.
+    shares the same in-memory database, and ``PRAGMA foreign_keys=ON`` so the
+    ``ON DELETE CASCADE`` relationships behave like PostgreSQL (D22).
     """
     if database_url.startswith("sqlite"):
-        return create_async_engine(database_url, poolclass=StaticPool)
+        engine = create_async_engine(database_url, poolclass=StaticPool)
+
+        @event.listens_for(engine.sync_engine, "connect")
+        def _enable_foreign_keys(dbapi_connection: object, _record: object) -> None:
+            # SQLite disables FK enforcement by default; the app relies on
+            # cascades (e.g. deleting a participant removes their entries).
+            cursor = dbapi_connection.cursor()  # type: ignore[attr-defined]
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
+
+        return engine
     return create_async_engine(database_url, pool_pre_ping=True)
 
 

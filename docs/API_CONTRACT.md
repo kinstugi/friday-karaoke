@@ -109,6 +109,7 @@ bcrypt-hashed. Emails are stored lowercase (case-insensitive uniqueness).
 | GET    | /api/v1/sessions/{id}/summary | host | Round/session summary (M16)  |
 | PATCH  | /api/v1/sessions/{id}/order  | host | Reorder the current round (per-round) |
 | DELETE | /api/v1/sessions/{id}/order  | host | Reset the current round to join order |
+| POST   | /api/v1/sessions/{id}/leave | participant | Delete the participant + all their songs (leave the night) |
 | POST   | /api/v1/sessions/{id}/start| host | Start session (owning host)   |
 | POST   | /api/v1/sessions/{id}/end  | host | End session (owning host)     |
 | GET    | /api/v1/sessions/{id}/qr   | host | Join URL as SVG QR code (M5)  |
@@ -439,6 +440,13 @@ PATCH /api/v1/sessions/{id}/order               Authorization: Bearer <host toke
 
 DELETE /api/v1/sessions/{id}/order               # back to join order
 200 { ...QueueSnapshotResponse... }
+
+# Leave the session (participant goes home early): deletes the participant and
+# all their songs; the nickname is freed and their token dies. If they were the
+# current singer, playback advances (E6).
+POST /api/v1/sessions/{id}/leave                Authorization: Bearer <participant token>
+204
+404 { "detail": "session not found" }            # unknown session or token from another session
 ```
 
 The queue snapshot's `queue` entries carry their `SINGING`/`NEXT`/`WAITING`
