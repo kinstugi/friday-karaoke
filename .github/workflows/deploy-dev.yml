@@ -1,0 +1,54 @@
+# Deploy the `dev` branch to Cloud Run automatically.
+#
+# Keyless: GitHub Actions authenticates to GCP via Workload Identity Federation
+# (no service-account key is ever created or stored). The provider trusts only
+# the `kinstugi/friday-karaoke` repo, and the service-account binding grants the
+# `dev` branch access. The Neon DB URL and YouTube API key are GitHub Actions
+# secrets — they never appear in the repo or its history.
+#
+# A future `master` branch can get its own workflow targeting a different server
+# without affecting this one.
+
+name: Deploy (dev -> Cloud Run)
+
+on:
+  push:
+    branches: [dev]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_WIF_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ vars.GCP_REGION }}-docker.pkg.dev --quiet
+
+      - name: Build image
+        run: docker build -t ${{ vars.GCP_ARTIFACT_REGISTRY }}/karaoke-app:latest .
+
+      - name: Push image
+        run: docker push ${{ vars.GCP_ARTIFACT_REGISTRY }}/karaoke-app:latest
+
+      - name: Deploy to Cloud Run
+        env:
+          KARAOKE_DATABASE_URL: ${{ secrets.KARAOKE_DATABASE_URL }}
+          KARAOKE_YOUTUBE_API_KEY: ${{ secrets.KARAOKE_YOUTUBE_API_KEY }}
+        run: |
+          gcloud run deploy karaoke-app \
+            --image=${{ vars.GCP_ARTIFACT_REGISTRY }}/karaoke-app:latest \
+            --region=${{ vars.GCP_REGION }} \
+            --allow-unauthenticated --min-instances=0 --memory=512Mi --cpu=1 \
+            --set-env-vars="KARAOKE_DATABASE_URL=$KARAOKE_DATABASE_URL,KARAOKE_RATE_LIMITS_ENABLED=true,KARAOKE_PUBLIC_BASE_URL=https://karaoke-app-ywmqmgfyoa-uc.a.run.app,KARAOKE_YOUTUBE_API_KEY=$KARAOKE_YOUTUBE_API_KEY"

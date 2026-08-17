@@ -56,6 +56,13 @@ Full local development commands: `docs/RUNBOOK.md`.
 - Database: Neon free-tier Postgres; deployment commands in `docs/RUNBOOK.md`
   (§ "Cloud Run deployment (test)").
 
+## CI/CD
+
+Pushing to the `dev` branch automatically builds the image and deploys it to
+Cloud Run (keyless, via GCP Workload Identity Federation — no service-account
+key). See `.github/workflows/deploy-dev.yml`. A future `master` branch can get
+its own deploy workflow to a separate server.
+
 ## Status
 
 All product milestones through **M18** are complete (join → round-robin queue →
