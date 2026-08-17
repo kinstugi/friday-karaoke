@@ -1,13 +1,14 @@
 # Deploy the `dev` branch to Cloud Run automatically.
 #
-# Keyless: GitHub Actions authenticates to GCP via Workload Identity Federation
-# (no service-account key is ever created or stored). The provider trusts only
-# the `kinstugi/friday-karaoke` repo, and the service-account binding grants the
-# `dev` branch access. The Neon DB URL and YouTube API key are GitHub Actions
-# secrets — they never appear in the repo or its history.
+# GitHub Actions authenticates to GCP using the `github-actions-deployer`
+# service-account key, stored ONLY as the encrypted `GCP_SA_KEY` GitHub Actions
+# secret (never in the repo or its history). We initially tried keyless Workload
+# Identity Federation, but its impersonated-credentials path kept denying
+# `iam.serviceAccounts.getAccessToken` despite correct-looking bindings, so we
+# pivoted to a service-account key — same secret-not-in-repo protection.
 #
-# A future `master` branch can get its own workflow targeting a different server
-# without affecting this one.
+# The Neon DB URL and YouTube API key are GitHub Actions secrets too. A future
+# `master` branch can get its own workflow targeting a different server.
 
 name: Deploy (dev -> Cloud Run)
 
@@ -16,7 +17,6 @@ on:
     branches: [dev]
 
 permissions:
-  id-token: write
   contents: read
 
 jobs:
@@ -28,8 +28,7 @@ jobs:
       - id: auth
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
-          service_account: ${{ vars.GCP_WIF_SERVICE_ACCOUNT }}
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
 
       - uses: google-github-actions/setup-gcloud@v2
 
