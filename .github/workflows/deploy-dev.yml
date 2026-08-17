@@ -30,11 +30,15 @@ jobs:
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
           service_account: ${{ vars.GCP_WIF_SERVICE_ACCOUNT }}
+          token_format: access_token
 
       - uses: google-github-actions/setup-gcloud@v2
 
-      - name: Configure Docker for Artifact Registry
-        run: gcloud auth configure-docker ${{ vars.GCP_REGION }}-docker.pkg.dev --quiet
+      - name: Docker login to Artifact Registry
+        run: |
+          echo "${{ steps.auth.outputs.access_token }}" | \
+            docker login -u oauth2accesstoken --password-stdin \
+            https://${{ vars.GCP_REGION }}-docker.pkg.dev
 
       - name: Build image
         run: docker build -t ${{ vars.GCP_ARTIFACT_REGISTRY }}/karaoke-app:latest .
