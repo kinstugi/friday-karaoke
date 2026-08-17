@@ -30,13 +30,12 @@ jobs:
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
           service_account: ${{ vars.GCP_WIF_SERVICE_ACCOUNT }}
-          token_format: access_token
 
       - uses: google-github-actions/setup-gcloud@v2
 
       - name: Docker login to Artifact Registry
         run: |
-          echo "${{ steps.auth.outputs.access_token }}" | \
+          gcloud auth print-access-token | \
             docker login -u oauth2accesstoken --password-stdin \
             https://${{ vars.GCP_REGION }}-docker.pkg.dev
 
