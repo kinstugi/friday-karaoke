@@ -235,6 +235,11 @@ button.link-button {
   border-color: var(--success);
 }
 
+.queue-loading-card,
+.host-loading-card {
+  border-style: dashed;
+}
+
 .label {
   margin: 0;
   font-size: 0.75rem;

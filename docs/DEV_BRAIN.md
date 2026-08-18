@@ -11,7 +11,7 @@ of every milestone. The persistent context lives in `PROJECT_BRAIN.md`.
 
 ## Current task
 
-**Participant "leave session" feature (D50) — IMPLEMENTED + locally verified, pending deploy.**
+**Participant "leave session" feature (D50) — IMPLEMENTED, verified, DEPLOYED via CI.**
 
 A participant can delete themselves from the session (`POST /api/v1/sessions/{id}/leave`):
 their identity and all their songs are removed via the DB cascade (nickname freed,
@@ -19,9 +19,33 @@ token dies, absent from future rounds), and if they were the current singer play
 advances (E6). The participant queue screen has a "Leave session" button. SQLite's
 foreign-key cascade is now enabled in the test engine (`PRAGMA foreign_keys=ON`) so
 the suite exercises the same cascade PostgreSQL has. Suite **264 passed**; pyright 0;
-frontend green; local smoke verified deletion + nickname reuse. **Cloud Run deployment
-pending.** The queue revision (join order / skip-to-end / per-round reorder) is already
-deployed. Decisions D43/D20/D50 carry notes. Next milestone: **M19 — PWA + mobile UX**.
+frontend green; local smoke verified deletion + nickname reuse. Live revision
+`karaoke-app-00006-9bb` (health + DB OK). The queue revision (join order /
+skip-to-end / per-round reorder) is already deployed. Decisions D43/D20/D50 carry
+notes. Next milestone: **M19 — PWA + mobile UX**.
+
+## CI/CD pipeline (live)
+
+Pushing to `dev` auto-builds the image and deploys to Cloud Run
+(`.github/workflows/deploy-dev.yml`, live as of this milestone). Auth uses the
+`github-actions-deployer` service-account key stored only as the encrypted
+`GCP_SA_KEY` GitHub Actions secret (never in the repo/history); Neon DB URL and
+YouTube API key are also Actions secrets. Initially tried keyless Workload Identity
+Federation, but its impersonated-credentials path kept denying
+`iam.serviceAccounts.getAccessToken` despite correct bindings — pivoted to a SA key
+(same secret-not-in-repo protection). Cloud Run's runtime SA needs the deployer to
+have `roles/iam.serviceAccountUser` (actAs) on it. A future `master` branch can get
+its own deploy workflow to a separate server.
+
+## Frontend UX follow-up (submit → queue)
+
+Participant submit keeps the original post-submit flow: the success card remains on
+the add-song screen with **View Queue** and **Add Another** actions. The queue screen
+only changes its initial loading state: while the authoritative snapshot loads, it
+keeps the mobile topbar visible and shows a styled loading card instead of a bare
+"Loading queue…" message. Host dashboard initial loading now uses the wide
+host/projector layout instead of the mobile participant container. Frontend checks:
+`npm run typecheck`, `npm run lint`, `npm run build`.
 
 ## M18 scope (plan.md §M18)
 

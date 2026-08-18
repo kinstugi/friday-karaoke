@@ -59,9 +59,10 @@ Full local development commands: `docs/RUNBOOK.md`.
 ## CI/CD
 
 Pushing to the `dev` branch automatically builds the image and deploys it to
-Cloud Run (keyless, via GCP Workload Identity Federation — no service-account
-key). See `.github/workflows/deploy-dev.yml`. A future `master` branch can get
-its own deploy workflow to a separate server.
+Cloud Run. GitHub Actions authenticates using the `github-actions-deployer`
+service-account key, stored only as the encrypted `GCP_SA_KEY` Actions secret
+(never in the repo/history). See `.github/workflows/deploy-dev.yml`. A future
+`master` branch can get its own deploy workflow to a separate server.
 
 ## Status
 

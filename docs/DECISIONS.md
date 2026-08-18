@@ -864,6 +864,29 @@ These freeze MVP product behavior. They were captured in `docs/PRODUCT_SPEC.md`.
   nickname); revoking the token in a separate table (a live delete already makes
   the token unresolvable).
 
+## D51. CI/CD auth = service-account key secret, not Workload Identity Federation
+
+- **Status:** Accepted
+- **Decision:** The `dev`-branch deploy workflow (`.github/workflows/deploy-dev.yml`)
+  authenticates to GCP with the `github-actions-deployer` service-account key,
+  stored only as the encrypted `GCP_SA_KEY` GitHub Actions secret (`credentials_json`
+  to `google-github-actions/auth@v2`). This replaced the initially-chosen keyless
+  Workload Identity Federation (pool `github`, provider `friday-karaoke`, SA
+  bindings `workloadIdentityUser` + `serviceAccountTokenCreator`).
+- **Rationale:** WIF's impersonated-credentials path kept returning
+  `Permission 'iam.serviceAccounts.getAccessToken' denied` on the SA even after
+  granting `roles/iam.serviceAccountTokenCreator` to both the `dev` WIF principal
+  and the SA itself (verified in the IAM policy, with propagation waited out). After
+  several failed runs, we pivoted to a service-account key. This is still secret-
+  not-in-repo: the key exists only as an encrypted GitHub Actions secret (never
+  committed), same protection as the Neon/YouTube secrets.
+- **Trade-off (accepted):** a long-lived service-account key needs rotation instead
+  of WIF's ephemeral tokens; the key is still exposed if GitHub is compromised (as
+  with any GitHub secret). The WIF pool/provider + bindings were left in place but
+  are unused, so we can revisit keyless later.
+- **Rejected:** continuing to debug WIF's getAccessToken impersonation (blocked on
+  external IAM behavior, multiple failed runs); committing a key to the repo (never).
+
 ---
 
 ## Open questions (tracked)

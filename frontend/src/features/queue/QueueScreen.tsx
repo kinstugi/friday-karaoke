@@ -152,7 +152,15 @@ export default function QueueScreen() {
   if (!snapshot) {
     return (
       <div className="screen">
-        <p className="muted">{error ?? 'Loading queue…'}</p>
+        {identity ? (
+          <header className="topbar">
+            <span className="session-name">{identity.sessionName}</span>
+            <Link to={`/join/${joinCode}/submit`}>+ Add Song</Link>
+          </header>
+        ) : null}
+        <div className="card queue-loading-card">
+          <p className="muted">{error ?? 'Loading the live queue…'}</p>
+        </div>
       </div>
     )
   }

@@ -115,8 +115,8 @@ export default function SubmitSongScreen() {
           </p>
           {result.notice ? <p className="warn-text">{result.notice}</p> : null}
           <div className="row">
-            <Link to={`/join/${joinCode}/queue`}>
-              <button>View Queue</button>
+            <Link className="button-link" to={`/join/${joinCode}/queue`}>
+              View Queue
             </Link>
             <button
               className="ghost"

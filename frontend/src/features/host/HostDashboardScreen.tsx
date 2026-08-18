@@ -308,8 +308,14 @@ export default function HostDashboardScreen() {
 
   if (!session) {
     return (
-      <div className="screen">
-        <p className="muted">{error ?? 'Loading session…'}</p>
+      <div className="host-dashboard">
+        <div className="card host-loading-card">
+          <p className="label">Host dashboard</p>
+          <h1>Loading session…</h1>
+          <p className="muted">
+            {error ?? 'Preparing the projector view and live queue.'}
+          </p>
+        </div>
       </div>
     )
   }
@@ -354,8 +360,8 @@ export default function HostDashboardScreen() {
       {ended ? (
         <div className="card host-ended">
           <h2>This session has ended.</h2>
-          <Link to="/host">
-            <button>Back to dashboard</button>
+          <Link className="button-link" to="/host">
+            Back to dashboard
           </Link>
         </div>
       ) : (

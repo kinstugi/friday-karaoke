@@ -564,6 +564,30 @@ Notes:
 - The Neon/YouTube credentials are passed as env vars at deploy time and are
   never committed; move them to Secret Manager for production (M20).
 
+## CI/CD pipeline
+
+Pushing to the `dev` branch auto-deploys to Cloud Run via
+`.github/workflows/deploy-dev.yml`: auth → Docker login → build → push to Artifact
+Registry → `gcloud run deploy`. No manual steps needed.
+
+Secrets/vars (GitHub Actions, never committed):
+- Secret `GCP_SA_KEY` — JSON key for `github-actions-deployer@portfolio-kwaku...`
+  (used via `google-github-actions/auth@v2` `credentials_json`).
+- Secret `KARAOKE_DATABASE_URL`, `KARAOKE_YOUTUBE_API_KEY` — passed as env vars at deploy.
+- Variables `GCP_PROJECT_ID`, `GCP_REGION`, `GCP_ARTIFACT_REGISTRY`.
+
+IAM on the deployer SA:
+- `roles/run.admin`, `roles/artifactregistry.writer` (on the project).
+- `roles/iam.serviceAccountUser` on the Cloud Run **runtime** SA
+  (`NNNN-compute@developer.gserviceaccount.com`) so `gcloud run deploy` can actAs it.
+
+> Note: we first tried keyless Workload Identity Federation (pool `github`,
+> provider `friday-karaoke`), but its impersonated-credentials path kept denying
+> `iam.serviceAccounts.getAccessToken` despite correct-looking bindings, so we
+> pivoted to the `GCP_SA_KEY` service-account-key secret (same secret-not-in-repo
+> protection). The WIF pool/provider + bindings still exist but are unused; revisit
+> if we want keyless later.
+
 ## Branch / commit workflow
 
 - Development happens on `dev`. Never commit directly to `master`.
