@@ -171,7 +171,9 @@ song cap, sessions not tied to a browser) are in `docs/PRODUCT_SPEC.md` §8–§
 
 ## 8. Current milestone
 
-**M19 — PWA + mobile UX** (next; frontend). M18 is complete; see
+**M19 — PWA + mobile UX** (next; frontend). Active follow-up: host-assisted
+participant management for singers without phones (D52) — separate host screen,
+participant playlist view, and host add-song flow. M18 is complete; see
 `docs/DEV_BRAIN.md` for live status.
 
 ## 9. Completed milestones

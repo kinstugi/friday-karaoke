@@ -230,6 +230,9 @@ and is served as an SVG at `GET /api/v1/sessions/{id}/qr` (owning host).
 | POST   | /api/v1/sessions/{id}/entries/preview    | participant | Validate URL + return metadata preview (M6) |
 | POST   | /api/v1/sessions/{id}/entries            | participant | Submit song (create WAITING entry) (M7)  |
 | GET    | /api/v1/sessions/{id}/entries            | none        | Queue snapshot (public, sanitized) (M7)  |
+| GET    | /api/v1/sessions/{id}/participants       | host        | Host participant playlist management     |
+| POST   | /api/v1/sessions/{id}/participants       | host        | Host creates a participant by nickname   |
+| POST   | /api/v1/sessions/{id}/participants/{participantId}/entries | host | Host adds a song for that participant |
 | DELETE | /api/v1/entries/{entryId}                | participant *or* host | Cancel own WAITING / host remove (M7) |
 | PATCH  | /api/v1/entries/{entryId}/video          | host        | Host replaces the YouTube URL (M7)       |
 
@@ -295,6 +298,45 @@ GET /api/v1/sessions/{id}/summary                Authorization: Bearer <host tok
 }
 404 { "detail": "session not found" }             # unknown or another host's
 ```
+
+### Host participant playlists + assisted submission
+
+```text
+GET /api/v1/sessions/{id}/participants        Authorization: Bearer <host token>
+200 [
+  {
+    "id": "...",
+    "session_id": "...",
+    "nickname": "Nina",
+    "created_at": "...",
+    "entries": [
+      { "id": "...", "round_number": 1, "position": 2, "status": "WAITING",
+        "video_id": "dQw4w9WgXcQ", "youtube_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        "title": "Never Gonna Give You Up", "channel": "Rick Astley",
+        "duration_seconds": 213, "thumbnail_url": "...", "created_at": "..." }
+    ]
+  }
+]
+
+POST /api/v1/sessions/{id}/participants        Authorization: Bearer <host token>
+{ "nickname": "Nina" }
+201 { "id": "...", "session_id": "...", "nickname": "Nina", "created_at": "..." }
+409 { "detail": "nickname 'Nina' is already taken" }
+
+POST /api/v1/sessions/{id}/participants/{participantId}/entries
+Authorization: Bearer <host token>
+{ "youtube_url": "https://youtu.be/dQw4w9WgXcQ" }
+201 { ...SongSubmitResponse... }
+404 { "detail": "participant not found" }
+409 { "detail": "this karaoke night has ended" }   # or per-participant cap B15
+422 { "detail": "that doesn't look like a valid YouTube link" }
+```
+
+These are host-assist endpoints for singers without a phone. They do not expose a
+participant token. Host-created participants use the same nickname and cleanup
+rules as QR-created participants, including normal absent cleanup. Playlist lists
+only non-terminal queued songs; already-sung history remains covered by the
+session summary.
 
 ### Cancel / remove / edit (M7)
 

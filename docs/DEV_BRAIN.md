@@ -11,7 +11,21 @@ of every milestone. The persistent context lives in `PROJECT_BRAIN.md`.
 
 ## Current task
 
-**Participant "leave session" feature (D50) — IMPLEMENTED, verified, DEPLOYED via CI.**
+**Host-assisted participant management (D52) — IMPLEMENTED locally, pending full verification/deploy.**
+
+The host now gets a separate `/host/sessions/{id}/participants` screen to keep
+the playback dashboard mostly unchanged. It lists each participant and their
+non-terminal queued playlist, lets the host create a participant by nickname, and
+lets the host add a YouTube URL directly to any participant. Backend endpoints:
+`GET/POST /api/v1/sessions/{id}/participants` and
+`POST /api/v1/sessions/{id}/participants/{participantId}/entries`. Host-created
+participants follow the normal absent-cleanup behavior (`last_connected_at` set at
+creation). Direct add reuses the existing metadata fetch, song cap, round-robin
+assignment, duplicate notice, and realtime `QueueUpdated` broadcast. Tests added:
+`backend/tests/test_host_participants.py`.
+
+Previous task: **Participant "leave session" feature (D50) — IMPLEMENTED,
+verified, DEPLOYED via CI.**
 
 A participant can delete themselves from the session (`POST /api/v1/sessions/{id}/leave`):
 their identity and all their songs are removed via the DB cascade (nickname freed,

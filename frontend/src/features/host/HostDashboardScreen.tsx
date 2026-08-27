@@ -337,9 +337,14 @@ export default function HostDashboardScreen() {
       <header className="host-header">
         <div className="host-title">
           <h1>{session.name}</h1>
-          <p className={`badge badge-${session.status.toLowerCase()}`}>
-            {statusLabel(session.status)}
-          </p>
+          <div className="row host-nav">
+            <p className={`badge badge-${session.status.toLowerCase()}`}>
+              {statusLabel(session.status)}
+            </p>
+            <Link className="button-link" to={`/host/sessions/${sessionId}/participants`}>
+              Participants
+            </Link>
+          </div>
         </div>
         <div className="host-join">
           {qrSvg ? (

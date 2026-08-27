@@ -39,6 +39,28 @@ export interface Participant {
   created_at: string
 }
 
+export interface HostParticipantEntry {
+  id: string
+  round_number: number
+  position: number | null
+  status: QueueEntryStatus
+  video_id: string
+  youtube_url: string
+  title: string
+  channel: string
+  duration_seconds: number
+  thumbnail_url: string
+  created_at: string
+}
+
+export interface HostParticipantDetail {
+  id: string
+  session_id: string
+  nickname: string
+  created_at: string
+  entries: HostParticipantEntry[]
+}
+
 export interface JoinResult {
   token: string
   token_type: 'bearer'

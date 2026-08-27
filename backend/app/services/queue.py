@@ -29,6 +29,10 @@ from app.models.round import Round
 from app.models.round_order import RoundOrder
 from app.models.session import Session
 from app.models.youtube_video import YouTubeVideo
+from app.schemas.participant import (
+    HostParticipantDetailResponse,
+    HostParticipantEntryResponse,
+)
 from app.schemas.queue import QueueEntryResponse, QueueParticipant, QueueSnapshotResponse
 from app.schemas.session import SessionParticipantSummary, SessionSummaryResponse
 from app.schemas.youtube import YouTubeVideoData
@@ -339,6 +343,69 @@ class QueueService:
         return [
             QueueParticipant(nickname=nickname, remaining_songs=count)
             for nickname, count in rows
+        ]
+
+    async def participant_details(
+        self, session: AsyncSession, session_id: uuid.UUID
+    ) -> list[HostParticipantDetailResponse]:
+        """Host view of every participant and their queued playlist.
+
+        Only non-terminal entries are shown: this is the actionable playlist the
+        host can still run. Entries are ordered by round number then submission
+        order; current-round entries carry their computed queue position.
+        """
+        await self.cleanup_absent_participants(session, session_id)
+        active_entries = await self.get_active_entries(session, session_id)
+        position_by_entry = {
+            entry.id: index for index, entry in enumerate(active_entries, start=1)
+        }
+
+        participants = list(
+            await session.scalars(
+                select(Participant)
+                .where(Participant.session_id == session_id)
+                .order_by(Participant.created_at, Participant.id)
+            )
+        )
+        entries = list(
+            await session.scalars(
+                select(QueueEntry)
+                .join(Round, QueueEntry.round_id == Round.id)
+                .where(
+                    QueueEntry.session_id == session_id,
+                    QueueEntry.status.in_(QueueEntryStatus.non_terminal()),
+                )
+                .order_by(Round.number, QueueEntry.created_at, QueueEntry.id)
+            )
+        )
+        entries_by_participant: dict[uuid.UUID, list[HostParticipantEntryResponse]] = {
+            participant.id: [] for participant in participants
+        }
+        for entry in entries:
+            entries_by_participant.setdefault(entry.participant_id, []).append(
+                HostParticipantEntryResponse(
+                    id=entry.id,
+                    round_number=entry.round.number,
+                    position=position_by_entry.get(entry.id),
+                    status=entry.status,
+                    video_id=entry.youtube_video.youtube_video_id,
+                    youtube_url=entry.youtube_video.youtube_url,
+                    title=entry.youtube_video.title,
+                    channel=entry.youtube_video.channel,
+                    duration_seconds=entry.youtube_video.duration_seconds,
+                    thumbnail_url=entry.youtube_video.thumbnail_url,
+                    created_at=entry.created_at,
+                )
+            )
+        return [
+            HostParticipantDetailResponse(
+                id=participant.id,
+                session_id=participant.session_id,
+                nickname=participant.nickname,
+                created_at=participant.created_at,
+                entries=entries_by_participant.get(participant.id, []),
+            )
+            for participant in participants
         ]
 
     async def reorder(

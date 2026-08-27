@@ -887,6 +887,31 @@ These freeze MVP product behavior. They were captured in `docs/PRODUCT_SPEC.md`.
 - **Rejected:** continuing to debug WIF's getAccessToken impersonation (blocked on
   external IAM behavior, multiple failed runs); committing a key to the repo (never).
 
+## D52. Host-assisted participants and queued playlists
+
+- **Status:** Accepted
+- **Decision:** Add a separate host participant-management screen and host-only
+  endpoints under `/api/v1/sessions/{id}/participants`. The host can list every
+  participant with their non-terminal queued playlist, create a participant by
+  nickname, and add a YouTube song directly to a participant. The main playback
+  dashboard only gains a navigation link so its core control layout remains stable.
+- **Rationale:** Friday-night reality includes singers who forgot a phone or do
+  not want to use one. The host is already the final authority, and the host's
+  browser is the playback device, so letting the host create a session-scoped
+  participant and submit songs on their behalf preserves the backend/database as
+  the source of truth while avoiding paper/manual queue work.
+- **Cleanup rule:** Host-created participants use the same `last_connected_at`
+  behavior as QR-created participants (set at creation), so they are subject to
+  the normal absent-participant cleanup if they stay inactive past the configured
+  window. This matches the product choice for this follow-up.
+- **Trade-off (accepted):** the no-phone participant does not receive their raw
+  participant token and cannot later manage/cancel their own entries from a phone
+  unless they join separately with a different nickname; the host can still remove
+  or edit entries from the host surfaces.
+- **Rejected:** changing the main dashboard into a large participant-management
+  UI; exempting host-created participants from absent cleanup; preview-before-add
+  for the host path (extra tap and extra YouTube quota call).
+
 ---
 
 ## Open questions (tracked)
