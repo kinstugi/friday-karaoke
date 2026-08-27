@@ -31,4 +31,3 @@ build/
 # OpenCode / runtime
 .logs/
 opencode.db*
-.github/
