@@ -30,6 +30,7 @@ export default function QueueScreen() {
   const [error, setError] = useState<string | null>(null)
   const [connected, setConnected] = useState(false)
   const [notification, setNotification] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState<'queue' | 'mine'>('queue')
   const notifyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const showNotification = useCallback((message: string) => {
@@ -201,16 +202,32 @@ export default function QueueScreen() {
         </div>
       ) : (
         <>
-          {nowSinging ? (
-            <div className="card highlight">
-              <p className="label">Now singing</p>
-              <h2>{nowSinging.title}</h2>
-              <p className="muted">{nowSinging.participant_name}</p>
+          <div className="card highlight now-playing-card">
+            <div className="now-playing-art" aria-hidden="true">
+              {nowSinging?.thumbnail_url ? (
+                <img src={nowSinging.thumbnail_url} alt="" className="vinyl-art" />
+              ) : (
+                <span className="vinyl-fallback">♪</span>
+              )}
             </div>
-          ) : null}
+            <div className="now-playing-copy">
+              <p className="label">Now singing</p>
+              {nowSinging ? (
+                <>
+                  <h2>{nowSinging.title}</h2>
+                  <p className="muted">{nowSinging.participant_name} is on the mic</p>
+                </>
+              ) : (
+                <>
+                  <h2>Stage is warming up</h2>
+                  <p className="muted">Waiting for the host to start the next song.</p>
+                </>
+              )}
+            </div>
+          </div>
 
           {upNext ? (
-            <div className="card">
+            <div className="card up-next-card">
               <p className="label">Up next</p>
               <h3>{upNext.title}</h3>
               <p className="muted">
@@ -220,28 +237,83 @@ export default function QueueScreen() {
                   : ''}
               </p>
             </div>
-          ) : null}
+            ) : null}
 
-          <section className="queue">
-            <h2>Queue</h2>
-            {snapshot.queue.length === 0 ? (
-              <p className="muted">No songs yet — add the first one!</p>
-            ) : (
-              <ol className="queue-list">
-                {snapshot.queue.map((entry) => {
-                  const mine = entry.participant_name === identity.nickname
-                  return (
-                    <li key={entry.id} className={mine ? 'mine' : ''}>
-                      <span className="position">
-                        {entry.position ?? '—'}
-                      </span>
+          <div className="playlist-tabs" role="tablist" aria-label="Queue views">
+            <button
+              className={activeTab === 'queue' ? 'tab-button active' : 'tab-button'}
+              role="tab"
+              aria-selected={activeTab === 'queue'}
+              onClick={() => setActiveTab('queue')}
+            >
+              Live queue
+            </button>
+            <button
+              className={activeTab === 'mine' ? 'tab-button active' : 'tab-button'}
+              role="tab"
+              aria-selected={activeTab === 'mine'}
+              onClick={() => setActiveTab('mine')}
+            >
+              Your songs
+            </button>
+          </div>
+
+          {activeTab === 'queue' ? (
+            <section className="queue" role="tabpanel">
+              <h2>Tonight&apos;s playlist</h2>
+              {snapshot.queue.length === 0 ? (
+                <p className="muted">No songs yet — add the first one!</p>
+              ) : (
+                <ol className="queue-list playlist-list">
+                  {snapshot.queue.map((entry) => {
+                    const mine = entry.participant_name === identity.nickname
+                    return (
+                      <li key={entry.id} className={mine ? 'mine' : ''}>
+                        <span className="position">
+                          {entry.position ?? '—'}
+                        </span>
+                        {entry.thumbnail_url ? (
+                          <img src={entry.thumbnail_url} alt="" className="entry-thumb" />
+                        ) : null}
+                        <div className="entry-main">
+                          <strong>{entry.title}</strong>
+                          <span className="muted">
+                            {entry.participant_name} &middot;{' '}
+                            {formatDuration(entry.duration_seconds)}
+                          </span>
+                          {mine && entry.status === 'WAITING' ? (
+                            <button
+                              className="link-button"
+                              onClick={() => void handleCancel(entry)}
+                            >
+                              Cancel
+                            </button>
+                          ) : null}
+                        </div>
+                      </li>
+                    )
+                  })}
+                </ol>
+              )}
+            </section>
+          ) : (
+            <section className="queue" role="tabpanel">
+              <h2>Your playlist</h2>
+              {mySongs && mySongs.length > 0 ? (
+                <ol className="queue-list playlist-list">
+                  {mySongs.map((entry) => (
+                    <li key={entry.id} className="mine">
+                      <span className="position">{entry.position ?? '—'}</span>
+                      {entry.thumbnail_url ? (
+                        <img src={entry.thumbnail_url} alt="" className="entry-thumb" />
+                      ) : null}
                       <div className="entry-main">
                         <strong>{entry.title}</strong>
                         <span className="muted">
-                          {entry.participant_name} &middot;{' '}
-                          {formatDuration(entry.duration_seconds)}
+                          {entry.position !== null ? 'This round' : 'Upcoming'}{' '}
+                          &middot; {formatDuration(entry.duration_seconds)}
                         </span>
-                        {mine && entry.status === 'WAITING' ? (
+                        {entry.status === 'WAITING' ? (
                           <button
                             className="link-button"
                             onClick={() => void handleCancel(entry)}
@@ -251,39 +323,13 @@ export default function QueueScreen() {
                         ) : null}
                       </div>
                     </li>
-                  )
-                })}
-              </ol>
-            )}
-          </section>
-
-          {mySongs && mySongs.length > 0 ? (
-            <section className="queue">
-              <h2>Your songs</h2>
-              <ol className="queue-list">
-                {mySongs.map((entry) => (
-                  <li key={entry.id} className="mine">
-                    <span className="position">{entry.position ?? '—'}</span>
-                    <div className="entry-main">
-                      <strong>{entry.title}</strong>
-                      <span className="muted">
-                        {entry.position !== null ? 'This round' : 'Upcoming'}{' '}
-                        &middot; {formatDuration(entry.duration_seconds)}
-                      </span>
-                      {entry.status === 'WAITING' ? (
-                        <button
-                          className="link-button"
-                          onClick={() => void handleCancel(entry)}
-                        >
-                          Cancel
-                        </button>
-                      ) : null}
-                    </div>
-                  </li>
-                ))}
-              </ol>
+                  ))}
+                </ol>
+              ) : (
+                <p className="muted">You have no queued songs yet.</p>
+              )}
             </section>
-          ) : null}
+          )}
 
           {error ? <p className="error-text">{error}</p> : null}
 

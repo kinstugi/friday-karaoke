@@ -61,6 +61,17 @@ keeps the mobile topbar visible and shows a styled loading card instead of a bar
 host/projector layout instead of the mobile participant container. Frontend checks:
 `npm run typecheck`, `npm run lint`, `npm run build`.
 
+## Frontend visual refresh follow-up
+
+The frontend now uses a more energetic karaoke/music-app visual treatment: richer
+dark gradients, glowing primary actions, glassy cards, playlist-style queue rows
+with thumbnails, and a participant queue view with **Live queue / Your songs** tabs.
+The participant "Now singing" card renders like a music player with a spinning
+record-style thumbnail (disabled for reduced-motion users). Host screens keep their
+existing workflow but get the same modernized surfaces, stronger projector contrast,
+and a more polished participant-management view. Frontend checks: `npm run
+typecheck`, `npm run lint`, `npm run build`.
+
 ## M18 scope (plan.md §M18)
 
 Formalize the behavioral + integration + concurrency test matrix. Most behaviors
