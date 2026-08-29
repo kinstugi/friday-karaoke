@@ -45,6 +45,10 @@ class YouTubeVideoUnavailableError(Exception):
     """Raised when metadata cannot be fetched for a valid video ID (E4)."""
 
 
+class YouTubeQuotaExceededError(Exception):
+    """Raised when YouTube refuses metadata fetches because quota/rate limits are hit."""
+
+
 class YouTubeServiceConfigurationError(Exception):
     """Raised when the metadata service is not configured (no API key)."""
 
@@ -122,6 +126,24 @@ def _pick_thumbnail(thumbnails: dict[str, dict]) -> str:
     return ""
 
 
+def _is_quota_error(response: httpx.Response) -> bool:
+    """Return whether a YouTube Data API error body is a quota/rate-limit error."""
+    if response.status_code not in (403, 429):
+        return False
+    try:
+        payload = response.json()
+    except ValueError:
+        return False
+    if payload.get("error", {}).get("status") == "RESOURCE_EXHAUSTED":
+        return True
+    errors = payload.get("error", {}).get("errors", [])
+    for item in errors:
+        reason = item.get("reason")
+        if reason in {"quotaExceeded", "dailyLimitExceeded", "rateLimitExceeded"}:
+            return True
+    return False
+
+
 class YouTubeService:
     """Fetches YouTube metadata via the Data API v3 (decision D33)."""
 
@@ -144,9 +166,10 @@ class YouTubeService:
         """Fetch snippet + contentDetails for ``video_id``.
 
         Raises ``YouTubeServiceConfigurationError`` when no API key is
-        configured, or ``YouTubeVideoUnavailableError`` for a non-200 response
-        or a video with no retrievable metadata (E4). ``client`` is optional
-        and lets tests inject an ``httpx.MockTransport``.
+        configured, ``YouTubeQuotaExceededError`` when YouTube quota/rate limits
+        are exhausted, or ``YouTubeVideoUnavailableError`` for other non-200
+        responses or a video with no retrievable metadata (E4). ``client`` is
+        optional and lets tests inject an ``httpx.MockTransport``.
 
         Results are cached in-process for ``KARAOKE_YOUTUBE_CACHE_TTL_SECONDS``
         (M17): the same video previewed/submitted repeatedly — very common for
@@ -182,6 +205,8 @@ class YouTubeService:
                 await http.aclose()
 
         if response.status_code != 200:
+            if _is_quota_error(response):
+                raise YouTubeQuotaExceededError(video_id)
             raise YouTubeVideoUnavailableError(video_id)
 
         try:

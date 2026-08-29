@@ -333,10 +333,11 @@ Authorization: Bearer <host token>
 ```
 
 These are host-assist endpoints for singers without a phone. They do not expose a
-participant token. Host-created participants use the same nickname and cleanup
-rules as QR-created participants, including normal absent cleanup. Playlist lists
-only non-terminal queued songs; already-sung history remains covered by the
-session summary.
+participant token. Host-created participants use the same nickname rules as
+QR-created participants but are not absence-tracked (`last_connected_at = null`),
+because they have no WebSocket presence to refresh; QR-created participants still
+use normal absent cleanup. Playlist lists only non-terminal queued songs;
+already-sung history remains covered by the session summary.
 
 ### Cancel / remove / edit (M7)
 

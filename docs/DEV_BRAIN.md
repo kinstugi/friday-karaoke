@@ -11,20 +11,35 @@ of every milestone. The persistent context lives in `PROJECT_BRAIN.md`.
 
 ## Current task
 
-**Host-assisted participant management (D52) — IMPLEMENTED locally, pending full verification/deploy.**
+**Host add-song reliability follow-up — IMPLEMENTED, verified locally.**
 
-The host now gets a separate `/host/sessions/{id}/participants` screen to keep
-the playback dashboard mostly unchanged. It lists each participant and their
+Real-use feedback showed phone participants could keep adding songs while host-added
+no-phone participants eventually did not appear in the queue. Root cause: the D52
+host-created participants were given `last_connected_at` at creation but never had a
+device/WebSocket to refresh it, so the M16 lazy absent cleanup cancelled their
+WAITING songs after the cleanup window, including songs submitted by the host right
+before the broadcast snapshot. Fix: host-created/no-phone participants now store
+`last_connected_at = None` and are not absence-tracked; QR-created participants keep
+normal cleanup. YouTube Data API quota/rate-limit failures are also surfaced as a
+distinct 503 instead of the misleading "video unavailable" 404. Regression tests
+were added to `backend/tests/test_host_participants.py`, `backend/tests/test_entries.py`,
+and `backend/tests/test_youtube.py`. Verification: backend suite **278 passed**;
+`uv run pyright` reports 0 errors.
+
+Previous task: **Host-assisted participant management (D52) — IMPLEMENTED,
+verified, pushed/deployed.**
+
+The host gets a separate `/host/sessions/{id}/participants` screen to keep the
+playback dashboard mostly unchanged. It lists each participant and their
 non-terminal queued playlist, lets the host create a participant by nickname, and
 lets the host add a YouTube URL directly to any participant. Backend endpoints:
 `GET/POST /api/v1/sessions/{id}/participants` and
-`POST /api/v1/sessions/{id}/participants/{participantId}/entries`. Host-created
-participants follow the normal absent-cleanup behavior (`last_connected_at` set at
-creation). Direct add reuses the existing metadata fetch, song cap, round-robin
-assignment, duplicate notice, and realtime `QueueUpdated` broadcast. Tests added:
+`POST /api/v1/sessions/{id}/participants/{participantId}/entries`. Direct add
+reuses the existing metadata fetch, song cap, round-robin assignment, duplicate
+notice, and realtime `QueueUpdated` broadcast. Tests added:
 `backend/tests/test_host_participants.py`.
 
-Previous task: **Participant "leave session" feature (D50) — IMPLEMENTED,
+Earlier task: **Participant "leave session" feature (D50) — IMPLEMENTED,
 verified, DEPLOYED via CI.**
 
 A participant can delete themselves from the session (`POST /api/v1/sessions/{id}/leave`):

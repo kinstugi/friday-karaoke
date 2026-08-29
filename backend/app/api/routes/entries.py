@@ -56,6 +56,7 @@ from app.services.playback import playback_service
 from app.api.routes.playback import _notify_next_singer
 from app.services.session import SessionNotFoundError, session_service
 from app.services.youtube import (
+    YouTubeQuotaExceededError,
     YouTubeServiceConfigurationError,
     YouTubeVideoUnavailableError,
     extract_video_id,
@@ -112,6 +113,11 @@ async def _fetch_video_data(youtube_url: str) -> YouTubeVideoData:
     except YouTubeServiceConfigurationError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
+        ) from exc
+    except YouTubeQuotaExceededError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="YouTube quota is temporarily exhausted; try again later",
         ) from exc
     except YouTubeVideoUnavailableError as exc:
         raise HTTPException(

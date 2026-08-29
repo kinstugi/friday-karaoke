@@ -9,6 +9,7 @@ import pytest
 
 from app.schemas.youtube import YouTubeVideoData
 from app.services.youtube import (
+    YouTubeQuotaExceededError,
     YouTubeService,
     YouTubeServiceConfigurationError,
     YouTubeVideoUnavailableError,
@@ -149,6 +150,47 @@ async def test_fetch_metadata_http_error_raises_unavailable() -> None:
     service = YouTubeService(api_key="test-key")
     async with _client_for({}, status_code=403) as client:
         with pytest.raises(YouTubeVideoUnavailableError):
+            await service.fetch_video_metadata(VIDEO_ID, client=client)
+
+
+async def test_fetch_metadata_quota_error_raises_quota_exceeded() -> None:
+    response = {
+        "error": {
+            "errors": [
+                {
+                    "domain": "youtube.quota",
+                    "reason": "quotaExceeded",
+                    "message": "quota exceeded",
+                }
+            ],
+            "code": 403,
+            "message": "quota exceeded",
+        }
+    }
+    service = YouTubeService(api_key="test-key")
+    async with _client_for(response, status_code=403) as client:
+        with pytest.raises(YouTubeQuotaExceededError):
+            await service.fetch_video_metadata(VIDEO_ID, client=client)
+
+
+async def test_fetch_metadata_rate_limit_error_raises_quota_exceeded() -> None:
+    response = {
+        "error": {
+            "errors": [
+                {
+                    "domain": "usageLimits",
+                    "reason": "rateLimitExceeded",
+                    "message": "rate limit exceeded",
+                }
+            ],
+            "code": 429,
+            "message": "rate limit exceeded",
+            "status": "RESOURCE_EXHAUSTED",
+        }
+    }
+    service = YouTubeService(api_key="test-key")
+    async with _client_for(response, status_code=429) as client:
+        with pytest.raises(YouTubeQuotaExceededError):
             await service.fetch_video_metadata(VIDEO_ID, client=client)
 
 

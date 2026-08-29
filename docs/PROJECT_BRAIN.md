@@ -184,6 +184,12 @@ participant playlist view, and host add-song flow. M18 is complete; see
   under host intervention, E21 in both directions, and host/participant
   reconnect recovery. 10 new tests (suite 240); pyright 0; tests-only, no code
   changes (no bugs surfaced).
+- **Host add-song reliability follow-up** (backend): host-created/no-phone
+  participants are no longer absence-tracked (`last_connected_at = NULL`) so the
+  M16 lazy cleanup does not cancel host-added songs after 30 minutes; QR-created
+  participants still use normal realtime-based cleanup. YouTube quota/rate-limit
+  failures are surfaced as HTTP 503 instead of the misleading video-unavailable
+  404. Regression coverage added in host participants, entries, and YouTube tests.
 - **M17 — Security + abuse protection** (complete, backend): in-process fixed-
   window rate limiting on the public QR surface (`app/core/ratelimit.py`, D49) —
   join 10/min/IP, preview 20/min/IP, submit 20/min/IP → 429; a YouTube metadata
@@ -446,10 +452,14 @@ See `docs/DECISIONS.md` for the full, maintained list. Highlights:
   D47).
 - Round lifecycle (M16): absent-participant cleanup via `last_connected_at` +
   lazy GC-on-render (D48); snapshot round/participant summaries and a host-only
-  session summary endpoint.
+  session summary endpoint. Host-created/no-phone participants intentionally keep
+  `last_connected_at = NULL` and are not absence-tracked, because they cannot
+  refresh presence over WebSockets.
 - Security (M17): in-process per-IP rate limits on join/preview/submit (429
   beyond the window) and a YouTube metadata TTL cache for quota protection; the
-  rest of the abuse-protection checklist was already in place (D49).
+  service now distinguishes YouTube quota/rate-limit exhaustion as 503 instead
+  of a video-unavailable 404; the rest of the abuse-protection checklist was
+  already in place (D49).
 - No user-visible feature in M0 beyond a health check.
 
 ## 12. Commands for running / testing

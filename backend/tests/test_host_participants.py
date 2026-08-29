@@ -4,7 +4,12 @@ import uuid
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.queue_entry import QueueEntryStatus
+from app.models.participant import Participant
+from app.models.queue_entry import QueueEntry
 from app.schemas.youtube import YouTubeVideoData
 from app.services.youtube import youtube_service
 
@@ -84,6 +89,19 @@ def test_host_can_create_and_list_participants(client: TestClient) -> None:
             "entries": [],
         }
     ]
+
+
+async def test_host_created_participants_are_not_absence_tracked(
+    client: TestClient, session: AsyncSession
+) -> None:
+    session_body, headers = _create_session(client)
+    participant = _create_host_participant(client, session_body["id"], headers)
+
+    stored = await session.scalar(
+        select(Participant).where(Participant.id == uuid.UUID(participant["id"]))
+    )
+    assert stored is not None
+    assert stored.last_connected_at is None
 
 
 def test_host_create_rejects_taken_nickname_case_insensitive(client: TestClient) -> None:
@@ -168,6 +186,37 @@ def test_host_can_add_song_to_participant_playlist(
 
     queue = client.get(QUEUE_URL.format(session_id=session_body["id"])).json()
     assert queue["queue"][0]["participant_name"] == "No Phone Nina"
+
+
+async def test_host_created_participant_song_survives_active_snapshot_cleanup(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, session: AsyncSession
+) -> None:
+    session_body, headers = _create_session(client)
+    participant = _create_host_participant(client, session_body["id"], headers)
+    started = client.post(f"{SESSIONS_URL}/{session_body['id']}/start", headers=headers)
+    assert started.status_code == 200, started.text
+
+    async def fake_fetch(video_id: str) -> YouTubeVideoData:
+        return _sample_metadata()
+
+    monkeypatch.setattr(youtube_service, "fetch_video_metadata", fake_fetch)
+    response = client.post(
+        PARTICIPANT_ENTRIES_URL.format(
+            session_id=session_body["id"], participant_id=participant["id"]
+        ),
+        json={"youtube_url": WATCH_URL},
+        headers=headers,
+    )
+    assert response.status_code == 201, response.text
+
+    queue = client.get(QUEUE_URL.format(session_id=session_body["id"])).json()
+    assert queue["queue"][0]["participant_name"] == "No Phone Nina"
+
+    entry = await session.scalar(
+        select(QueueEntry).where(QueueEntry.id == uuid.UUID(response.json()["entry"]["id"]))
+    )
+    assert entry is not None
+    assert entry.status is QueueEntryStatus.WAITING
 
 
 def test_host_participant_playlist_shows_future_round_songs(

@@ -140,8 +140,9 @@ class ParticipantService:
         Mirrors the public join registration rules: nicknames are normalized and
         unique per session, ended sessions reject new participants, and a token
         hash is still stored even though the host UI does not expose the raw
-        token. ``last_connected_at`` is set to now, so these participants follow
-        the normal absent-cleanup behavior.
+        token. ``last_connected_at`` stays ``None`` because host-created
+        participants have no device/WebSocket presence to refresh; the host
+        manages their participation explicitly.
         """
         karaoke = await session.scalar(select(Session).where(Session.id == session_id))
         if karaoke is None:
@@ -167,7 +168,7 @@ class ParticipantService:
             nickname=display_nickname,
             nickname_lower=nickname_lower,
             token_hash=hash_auth_token(raw_token),
-            last_connected_at=datetime.now(timezone.utc),
+            last_connected_at=None,
         )
         session.add(participant)
         try:

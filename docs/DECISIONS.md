@@ -795,6 +795,11 @@ These freeze MVP product behavior. They were captured in `docs/PRODUCT_SPEC.md`.
   cleanup on snapshot render avoids background timers entirely (consistent with
   D47) while guaranteeing the authoritative state never shows ghost entries.
   The write is idempotent and only fires when stale participants exist.
+- **Clarification (post-D52):** `last_connected_at = NULL` means the participant
+  is not presence-tracked and is therefore not considered absent by this cleanup.
+  This is used for host-created/no-phone participants, because they have no
+  client WebSocket to refresh presence; QR-created participants still set and
+  refresh `last_connected_at` normally.
 - **Rejected:** A periodic background sweep task (restart/multi-worker fragility,
   D47 spirit); heartbeat pings from clients (extra protocol); treating absence as
   immediate (network blips would wrongly cancel songs — the window absorbs
@@ -816,9 +821,11 @@ These freeze MVP product behavior. They were captured in `docs/PRODUCT_SPEC.md`.
   429 when exceeded. The YouTube service gains an in-process TTL metadata cache
   (`KARAOKE_YOUTUBE_CACHE_TTL_SECONDS`, default 1 h) so repeated previews/
   submissions of the same video cost one Data API call instead of many —
-  protecting the free key's daily quota (D33). Sessions are intentionally
-  **retained** (no auto-deletion): ENDED is terminal, and a retention/cleanup
-  policy is an ops decision for M22, not a v1 feature.
+  protecting the free key's daily quota (D33). YouTube quota/rate-limit errors
+  are reported distinctly as HTTP 503 instead of being collapsed into the
+  user-facing "video unavailable" 404. Sessions are intentionally **retained**
+  (no auto-deletion): ENDED is terminal, and a retention/cleanup policy is an
+  ops decision for M22, not a v1 feature.
 - **Rationale:** The realistic threats to a public QR code are join flooding and
   YouTube quota exhaustion via preview/submit spam; both are cheaply bounded
   in-process (D9 — single worker, no Redis). The existing defenses already
@@ -900,17 +907,23 @@ These freeze MVP product behavior. They were captured in `docs/PRODUCT_SPEC.md`.
   browser is the playback device, so letting the host create a session-scoped
   participant and submit songs on their behalf preserves the backend/database as
   the source of truth while avoiding paper/manual queue work.
-- **Cleanup rule:** Host-created participants use the same `last_connected_at`
-  behavior as QR-created participants (set at creation), so they are subject to
-  the normal absent-participant cleanup if they stay inactive past the configured
-  window. This matches the product choice for this follow-up.
+- **Cleanup rule (revised after live feedback):** Host-created/no-phone
+  participants are **not absence-tracked**: `last_connected_at` is stored as
+  `NULL`, so lazy absent cleanup leaves their WAITING songs alone. QR-created
+  participants still set `last_connected_at` on join and refresh it on realtime
+  connect, so normal absent cleanup remains in place for phone participants.
+  Rationale: no-phone singers have no WebSocket presence to refresh, and the
+  host is explicitly managing them; treating them like disconnected phones made
+  host-added songs vanish after the cleanup window.
 - **Trade-off (accepted):** the no-phone participant does not receive their raw
   participant token and cannot later manage/cancel their own entries from a phone
   unless they join separately with a different nickname; the host can still remove
   or edit entries from the host surfaces.
 - **Rejected:** changing the main dashboard into a large participant-management
-  UI; exempting host-created participants from absent cleanup; preview-before-add
-  for the host path (extra tap and extra YouTube quota call).
+  UI; preview-before-add for the host path (extra tap and extra YouTube quota
+  call). The earlier rejection of exempting host-created participants from
+  absent cleanup was reversed after real-use testing showed it made host-added
+  songs disappear.
 
 ---
 

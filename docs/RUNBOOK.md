@@ -482,7 +482,10 @@ EOF
   channel for `KARAOKE_ABSENT_PARTICIPANT_CLEANUP_SECONDS` (default 30 min) has
   their remaining `WAITING` songs cancelled when the snapshot is rendered (only
   for started sessions; an absent `NEXT`/`SINGING` singer stays the host's skip
-  call). Covered by `backend/tests/test_rounds.py`.
+  call). Host-created/no-phone participants are intentionally not absence-tracked
+  (`last_connected_at = NULL`) because they have no WebSocket presence to refresh;
+  their songs stay host-managed. Covered by `backend/tests/test_rounds.py` and
+  `backend/tests/test_host_participants.py`.
 - The snapshot reports `rounds_completed` and per-participant `remaining_songs`;
   the host-only `/sessions/{id}/summary` reports submitted/sung/remaining.
 
