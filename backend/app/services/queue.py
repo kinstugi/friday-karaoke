@@ -741,6 +741,7 @@ class QueueService:
             )
         )
         if existing is not None:
+            self._refresh_degraded_video(existing, data)
             return existing
         video = YouTubeVideo(
             youtube_video_id=data.video_id,
@@ -762,8 +763,27 @@ class QueueService:
             )
             if existing is None:
                 raise  # pragma: no cover - unique constraint guarantees a winner
+            self._refresh_degraded_video(existing, data)
             return existing
         return video
+
+    def _refresh_degraded_video(
+        self, existing: YouTubeVideo, data: YouTubeVideoData
+    ) -> None:
+        """Fill in a previously degraded oEmbed-only metadata row.
+
+        Degraded rows have ``duration_seconds=0`` because oEmbed has no duration.
+        If a later successful Data API fetch provides a real duration, keep the
+        existing row/id (so duplicate entries still share metadata) and update
+        display fields in-place. The caller's surrounding commit persists it.
+        """
+        if existing.duration_seconds != 0 or data.duration_seconds <= 0:
+            return
+        existing.youtube_url = data.youtube_url
+        existing.title = data.title
+        existing.channel = data.channel
+        existing.duration_seconds = data.duration_seconds
+        existing.thumbnail_url = data.thumbnail_url
 
 
 queue_service = QueueService()

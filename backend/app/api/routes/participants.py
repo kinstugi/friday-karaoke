@@ -153,7 +153,7 @@ async def add_participant_song(
         )
     except ParticipantNotFoundError as exc:
         raise _participant_not_found() from exc
-    data = await _fetch_video_data(payload.youtube_url)
+    data = await _fetch_video_data(payload.youtube_url, allow_quota_fallback=True)
     try:
         entry, duplicate = await queue_service.submit(session, participant, data)
     except SongLimitError as exc:

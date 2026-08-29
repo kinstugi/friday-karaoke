@@ -11,7 +11,29 @@ of every milestone. The persistent context lives in `PROJECT_BRAIN.md`.
 
 ## Current task
 
-**Host add-song reliability follow-up — IMPLEMENTED, verified locally.**
+**Optimistic queue + keyless metadata (D53) — IMPLEMENTED, verified locally; host participant UI follow-up applied.**
+
+Phase 2 moved song adding to an optimistic/local-first UX while keeping the
+backend/database authoritative. The frontend now has `QueueProvider`/
+`useQueueStore` for temporary optimistic rows, keyless YouTube oEmbed metadata
+(`frontend/src/lib/youtube.ts`) with localStorage caching, an instant participant
+add-song card, and optimistic host participant add rows. The backend submit paths
+now degrade gracefully on YouTube Data API quota/rate-limit exhaustion: participant
+submit and host participant add fall back to server-side oEmbed metadata
+(`duration_seconds=0`) instead of failing, while preview stays strict so duration
+warnings remain authoritative. If a later Data API fetch succeeds, a previous
+oEmbed-only video row is refreshed with the real duration/title/channel/thumbnail.
+Verification: backend suite **283 passed**; `uv run pyright` reports 0 errors;
+frontend `npm run typecheck`, `npm run lint`, and `npm run build` all pass. PWA
+work moves after this follow-up.
+
+Host participant UI follow-up: `/host/sessions/{id}/participants` now opens with a
+grid of singer tiles/cards. The host clicks a singer to open a selected-singer
+detail panel, then adds YouTube links to that singer's playlist there. This keeps
+the screen from showing every add-song form at once. Frontend verification after
+this UI follow-up: `npm run typecheck`, `npm run lint`, and `npm run build` pass.
+
+Previous task: **Host add-song reliability follow-up — IMPLEMENTED, verified locally.**
 
 Real-use feedback showed phone participants could keep adding songs while host-added
 no-phone participants eventually did not appear in the queue. Root cause: the D52

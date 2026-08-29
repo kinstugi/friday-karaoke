@@ -5,7 +5,6 @@ import { type FormEvent, useCallback, useEffect, useState } from 'react'
 import { Link, Navigate, useParams } from 'react-router-dom'
 
 import {
-  addHostParticipantSong,
   createHostParticipant,
   fetchHostParticipants,
   fetchSession,
@@ -14,9 +13,13 @@ import type { HostParticipantDetail, HostParticipantEntry, Session } from '../..
 import { formatDuration } from '../../lib/format'
 import { loadHostIdentity } from '../../lib/hostToken'
 import { statusLabel } from '../../lib/session'
+import { fetchOEmbedMetadata } from '../../lib/youtube'
+import { type QueueDisplayEntry, useQueueStore } from '../../queue/context'
 import { useRealtime } from '../../ws/useRealtime'
 
 const POLL_INTERVAL_MS = 5000
+
+type PlaylistEntry = HostParticipantEntry | QueueDisplayEntry
 
 function entryStatusLabel(status: HostParticipantEntry['status']): string {
   switch (status) {
@@ -37,14 +40,27 @@ function entryStatusLabel(status: HostParticipantEntry['status']): string {
   }
 }
 
+function isOptimisticEntry(entry: PlaylistEntry): entry is QueueDisplayEntry {
+  return 'participant_name' in entry
+}
+
+function playlistDuration(entry: PlaylistEntry): string {
+  if (isOptimisticEntry(entry) && entry.duration_seconds === 0) return 'duration resolving'
+  if (entry.duration_seconds === 0) return 'duration unknown'
+  return formatDuration(entry.duration_seconds)
+}
+
 export default function HostParticipantsScreen() {
   const { sessionId = '' } = useParams()
   const [identity] = useState(loadHostIdentity)
+  const queueStore = useQueueStore()
+  const { clearSynced } = queueStore
 
   const [session, setSession] = useState<Session | null>(null)
   const [participants, setParticipants] = useState<HostParticipantDetail[] | null>(null)
   const [nickname, setNickname] = useState('')
   const [songUrls, setSongUrls] = useState<Record<string, string>>({})
+  const [selectedParticipantId, setSelectedParticipantId] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -59,11 +75,12 @@ export default function HostParticipantsScreen() {
       ])
       setSession(loadedSession)
       setParticipants(loadedParticipants)
+      clearSynced(loadedParticipants.flatMap((participant) => participant.entries))
       setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load participants')
     }
-  }, [identity, sessionId])
+  }, [clearSynced, identity, sessionId])
 
   useEffect(() => {
     void refresh()
@@ -106,6 +123,7 @@ export default function HostParticipantsScreen() {
     try {
       const participant = await createHostParticipant(identity.token, sessionId, nickname.trim())
       setNickname('')
+      setSelectedParticipantId(participant.id)
       setNotice(`${participant.nickname} was added to the session.`)
       await refresh()
     } catch (err) {
@@ -124,12 +142,14 @@ export default function HostParticipantsScreen() {
     setError(null)
     setNotice(null)
     try {
-      const result = await addHostParticipantSong(
-        identity.token,
+      const metadata = await fetchOEmbedMetadata(youtubeUrl)
+      const result = await queueStore.addHostSong({
+        token: identity.token,
         sessionId,
-        participant.id,
-        youtubeUrl,
-      )
+        participantId: participant.id,
+        participantName: participant.nickname,
+        metadata,
+      })
       setSongUrls((prev) => ({ ...prev, [participant.id]: '' }))
       setNotice(`Added “${result.entry.title}” for ${participant.nickname}.`)
       await refresh()
@@ -154,6 +174,18 @@ export default function HostParticipantsScreen() {
     )
   }
 
+  const selectedParticipant =
+    participants.find((participant) => participant.id === selectedParticipantId) ?? null
+
+  function participantPlaylist(participant: HostParticipantDetail): PlaylistEntry[] {
+    return [
+      ...participant.entries,
+      ...queueStore.optimisticEntries.filter(
+        (entry) => entry.participant_name === participant.nickname,
+      ),
+    ]
+  }
+
   return (
     <div className="host-dashboard host-participants">
       <header className="host-header">
@@ -176,7 +208,7 @@ export default function HostParticipantsScreen() {
           <p className="label">Add a singer</p>
           <h2>No phone? Add them here.</h2>
           <p className="muted">
-            Host-created singers follow the normal absent cleanup rules.
+            Host-created singers stay host-managed and are not auto-cleaned for absence.
           </p>
         </div>
         <form className="row participant-create" onSubmit={(event) => void handleCreateParticipant(event)}>
@@ -207,79 +239,132 @@ export default function HostParticipantsScreen() {
       {error ? <p className="error-text">{error}</p> : null}
 
       <section className="host-participant-list">
-        <h2>Singers</h2>
+        <div className="participant-list-head">
+          <div>
+            <p className="label">Choose a singer</p>
+            <h2>Singers</h2>
+          </div>
+          <p className="muted">Click a card to open their playlist and add music.</p>
+        </div>
         {participants.length === 0 ? (
           <div className="card">
             <p className="muted">No singers yet — add the first one above.</p>
           </div>
         ) : (
-          participants.map((participant) => (
-            <article className="card stack participant-card" key={participant.id}>
-              <div className="row participant-card-head">
-                <div>
-                  <p className="label">Singer</p>
-                  <h2>{participant.nickname}</h2>
-                </div>
-                <p className="badge badge-round">
-                  {participant.entries.length} queued
-                </p>
-              </div>
-
-              <form
-                className="row participant-song-form"
-                onSubmit={(event) => void handleAddSong(event, participant)}
-              >
-                <div className="field participant-song-field">
-                  <label htmlFor={`song-url-${participant.id}`}>YouTube link</label>
-                  <input
-                    id={`song-url-${participant.id}`}
-                    type="url"
-                    value={songUrls[participant.id] ?? ''}
-                    onChange={(event) =>
-                      setSongUrls((prev) => ({
-                        ...prev,
-                        [participant.id]: event.target.value,
-                      }))
-                    }
-                    placeholder="Paste a YouTube link"
-                    disabled={ended || busy !== null}
-                    required
-                  />
-                </div>
+          <div className="participant-tile-grid">
+            {participants.map((participant) => {
+              const entries = participantPlaylist(participant)
+              const latest = entries.at(-1)
+              const selected = participant.id === selectedParticipant?.id
+              return (
                 <button
-                  type="submit"
-                  disabled={
-                    ended ||
-                    busy !== null ||
-                    (songUrls[participant.id] ?? '').trim() === ''
-                  }
+                  type="button"
+                  className={`participant-tile${selected ? ' selected' : ''}`}
+                  key={participant.id}
+                  onClick={() => setSelectedParticipantId(participant.id)}
+                  aria-pressed={selected}
                 >
-                  {busy === `song:${participant.id}` ? 'Adding…' : 'Add song'}
+                  <span className="participant-avatar" aria-hidden="true">
+                    {participant.nickname.trim().charAt(0).toUpperCase() || '♪'}
+                  </span>
+                  <span className="participant-tile-copy">
+                    <strong>{participant.nickname}</strong>
+                    <span className="muted">
+                      {entries.length} queued{latest ? ` · ${latest.title}` : ''}
+                    </span>
+                  </span>
+                  <span className="badge badge-round">Open</span>
                 </button>
-              </form>
-
-              {participant.entries.length === 0 ? (
-                <p className="muted">No queued songs yet.</p>
-              ) : (
-                <ol className="queue-list participant-playlist">
-                  {participant.entries.map((entry) => (
-                    <li key={entry.id}>
-                      <span className="position">{entry.position ?? '—'}</span>
-                      <div className="entry-main">
-                        <strong>{entry.title}</strong>
-                        <span className="muted">
-                          Round {entry.round_number} &middot; {entryStatusLabel(entry.status)} &middot;{' '}
-                          {formatDuration(entry.duration_seconds)}
-                        </span>
-                      </div>
-                    </li>
-                  ))}
-                </ol>
-              )}
-            </article>
-          ))
+              )
+            })}
+          </div>
         )}
       </section>
+
+      {participants.length > 0 && !selectedParticipant ? (
+        <section className="card participant-empty-detail">
+          <p className="label">Playlist</p>
+          <h2>Select a singer</h2>
+          <p className="muted">Choose a card above to add music to that singer&apos;s list.</p>
+        </section>
+      ) : null}
+
+      {selectedParticipant ? (
+        <section className="card stack participant-detail-panel">
+          <div className="row participant-card-head">
+            <div>
+              <p className="label">Selected singer</p>
+              <h2>{selectedParticipant.nickname}</h2>
+              <p className="muted">Add songs only for this singer here.</p>
+            </div>
+            <p className="badge badge-round">
+              {participantPlaylist(selectedParticipant).length} queued
+            </p>
+          </div>
+
+          <form
+            className="row participant-song-form"
+            onSubmit={(event) => void handleAddSong(event, selectedParticipant)}
+          >
+            <div className="field participant-song-field">
+              <label htmlFor={`song-url-${selectedParticipant.id}`}>YouTube link</label>
+              <input
+                id={`song-url-${selectedParticipant.id}`}
+                type="url"
+                value={songUrls[selectedParticipant.id] ?? ''}
+                onChange={(event) =>
+                  setSongUrls((prev) => ({
+                    ...prev,
+                    [selectedParticipant.id]: event.target.value,
+                  }))
+                }
+                placeholder="Paste a YouTube link"
+                disabled={ended || busy !== null}
+                required
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={
+                ended ||
+                busy !== null ||
+                (songUrls[selectedParticipant.id] ?? '').trim() === ''
+              }
+            >
+              {busy === `song:${selectedParticipant.id}` ? 'Adding…' : 'Add song'}
+            </button>
+          </form>
+
+          {participantPlaylist(selectedParticipant).length === 0 ? (
+            <p className="muted">No queued songs yet for this singer.</p>
+          ) : (
+            <ol className="queue-list participant-playlist">
+              {participantPlaylist(selectedParticipant).map((entry) => (
+                <li key={entry.id} className={isOptimisticEntry(entry) ? 'optimistic' : ''}>
+                  <span className="position">{entry.position ?? '—'}</span>
+                  <div className="entry-main">
+                    <strong>{entry.title}</strong>
+                    <span className="muted">
+                      {isOptimisticEntry(entry)
+                        ? 'Syncing'
+                        : `Round ${entry.round_number} · ${entryStatusLabel(entry.status)}`}{' '}
+                      &middot; {playlistDuration(entry)}
+                    </span>
+                    {isOptimisticEntry(entry) && entry.optimistic_status ? (
+                      <span className={`badge badge-${entry.optimistic_status}`}>
+                        {entry.optimistic_status === 'syncing' ? 'Syncing' : 'Failed'}
+                      </span>
+                    ) : null}
+                    {isOptimisticEntry(entry) && entry.optimistic_error ? (
+                      <span className="error-text">{entry.optimistic_error}</span>
+                    ) : null}
+                  </div>
+                </li>
+              ))}
+            </ol>
+          )}
+        </section>
+      ) : null}
     </div>
   )
 }

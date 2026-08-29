@@ -259,7 +259,11 @@ POST /api/v1/sessions/{id}/entries            Authorization: Bearer <participant
 The entry is assigned to a round at submission (D43): the current round when the
 participant has no non-terminal entry there, otherwise the next round above their
 highest round. `position` is `null` for future-round entries (not yet in the
-active queue).
+active queue). Submit normally uses YouTube Data API metadata; if the Data API
+quota/rate limit is exhausted, submit falls back to keyless oEmbed metadata and
+still returns 201 with `duration_seconds: 0` until a later successful Data API
+fetch refreshes the stored video row. The preview endpoint remains strict because
+duration is required for the long-video warning.
 
 ### Queue snapshot (M7, round-scoped at M10.1, summaries at M16)
 
@@ -337,7 +341,8 @@ participant token. Host-created participants use the same nickname rules as
 QR-created participants but are not absence-tracked (`last_connected_at = null`),
 because they have no WebSocket presence to refresh; QR-created participants still
 use normal absent cleanup. Playlist lists only non-terminal queued songs;
-already-sung history remains covered by the session summary.
+already-sung history remains covered by the session summary. Host add uses the
+same quota-degraded oEmbed fallback as participant submit.
 
 ### Cancel / remove / edit (M7)
 

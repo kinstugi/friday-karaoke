@@ -11,7 +11,7 @@ from app.domain.queue_entry import QueueEntryStatus
 from app.models.participant import Participant
 from app.models.queue_entry import QueueEntry
 from app.schemas.youtube import YouTubeVideoData
-from app.services.youtube import youtube_service
+from app.services.youtube import YouTubeQuotaExceededError, youtube_service
 
 REGISTER_URL = "/api/v1/auth/host/register"
 LOGIN_URL = "/api/v1/auth/host/login"
@@ -186,6 +186,35 @@ def test_host_can_add_song_to_participant_playlist(
 
     queue = client.get(QUEUE_URL.format(session_id=session_body["id"])).json()
     assert queue["queue"][0]["participant_name"] == "No Phone Nina"
+
+
+def test_host_add_queues_oembed_metadata_when_data_api_quota_is_exhausted(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session_body, headers = _create_session(client)
+    participant = _create_host_participant(client, session_body["id"], headers)
+
+    async def fake_fetch(video_id: str) -> YouTubeVideoData:
+        raise YouTubeQuotaExceededError(video_id)
+
+    async def fake_oembed(video_id: str) -> YouTubeVideoData:
+        return _sample_metadata(video_id=video_id, title="Fallback Host Song").model_copy(
+            update={"duration_seconds": 0}
+        )
+
+    monkeypatch.setattr(youtube_service, "fetch_video_metadata", fake_fetch)
+    monkeypatch.setattr(youtube_service, "fetch_oembed_metadata", fake_oembed)
+    response = client.post(
+        PARTICIPANT_ENTRIES_URL.format(
+            session_id=session_body["id"], participant_id=participant["id"]
+        ),
+        json={"youtube_url": WATCH_URL},
+        headers=headers,
+    )
+    assert response.status_code == 201, response.text
+    entry = response.json()["entry"]
+    assert entry["title"] == "Fallback Host Song"
+    assert entry["duration_seconds"] == 0
 
 
 async def test_host_created_participant_song_survives_active_snapshot_cleanup(

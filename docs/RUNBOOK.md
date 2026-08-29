@@ -517,6 +517,24 @@ EOF
 - Covered by `backend/tests/test_security.py` (rate-limit tests) and
   `backend/tests/test_youtube.py` (2 cache tests).
 
+## Optimistic queue + oEmbed verification (D53)
+
+- Participant add flow: paste a supported YouTube URL, click **Show song**; the
+  keyless oEmbed card should render without using the backend preview endpoint.
+  If YouTube's oEmbed endpoint returns 401/404/CORS/network failure, the card may
+  show generic `Song syncing…` metadata, but the add must still POST to the
+  backend.
+  Click **Add to Queue**; the success card appears immediately and the queue shows
+  a dashed `Syncing` row until the backend snapshot confirms the real entry.
+- Host participant add flow: on `/host/sessions/{id}/participants`, paste a URL
+  under a singer; the playlist shows the dashed `Syncing` row immediately, then
+  reconciles to the authoritative entry after the POST/snapshot.
+- Data API quota fallback: participant submit and host add return 201 with oEmbed
+  metadata (`duration_seconds=0`) when Data API quota is exhausted; preview still
+  returns 503 because duration warnings require Data API metadata. Covered by
+  `backend/tests/test_queue.py`, `backend/tests/test_host_participants.py`, and
+  `backend/tests/test_youtube.py`.
+
 ## Concurrency / failure verification (M18)
 
 The concurrency + failure-scenario matrix is covered by

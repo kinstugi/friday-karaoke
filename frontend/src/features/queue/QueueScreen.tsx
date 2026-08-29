@@ -12,6 +12,7 @@ import { formatDuration } from '../../lib/format'
 import { statusLabel } from '../../lib/session'
 import { clearIdentity, loadIdentity } from '../../lib/token'
 import { useTransitionRemaining } from '../../lib/transition'
+import { type QueueDisplayEntry, useQueueStore } from '../../queue/context'
 import { useRealtime } from '../../ws/useRealtime'
 
 const POLL_INTERVAL_MS = 5000
@@ -21,6 +22,8 @@ const NOTIFICATION_MS = 8000
 export default function QueueScreen() {
   const { joinCode = '' } = useParams()
   const navigate = useNavigate()
+  const queueStore = useQueueStore()
+  const { clearSynced } = queueStore
   // Read the stored identity once so its reference (and thus the polling
   // effect below) stays stable across renders (avoids a fetch loop).
   const [identity] = useState(loadIdentity)
@@ -55,22 +58,25 @@ export default function QueueScreen() {
       ])
       setSnapshot(snap)
       setMySongs(mine)
+      clearSynced([...snap.queue, ...mine])
       setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load the queue')
     }
-  }, [identity])
+  }, [clearSynced, identity])
 
   // Refresh only the participant's own songs (e.g. after a round advance the
   // host may have processed an entry, removing it from the non-terminal list).
   const refreshMySongs = useCallback(async () => {
     if (!identity) return
     try {
-      setMySongs(await fetchMyEntries(identity.sessionId, identity.token))
+      const mine = await fetchMyEntries(identity.sessionId, identity.token)
+      setMySongs(mine)
+      clearSynced(mine)
     } catch {
       // Snapshot errors are surfaced by refresh(); keep the last-known list.
     }
-  }, [identity])
+  }, [clearSynced, identity])
 
   // Initial authoritative fetch; the live channel and the fallback poll below
   // keep the screen fresh afterwards.
@@ -90,6 +96,7 @@ export default function QueueScreen() {
     onEvent: (event) => {
       if (event.type === 'QueueUpdated') {
         setSnapshot(event.snapshot)
+        clearSynced(event.snapshot.queue)
         void refreshMySongs()
       } else if (event.type === 'SessionUpdated') {
         // The snapshot carries the session status too; keep it in sync so the
@@ -122,8 +129,9 @@ export default function QueueScreen() {
     inTransition ? (snapshot?.transition_until ?? null) : null,
   )
 
-  async function handleCancel(entry: QueueEntry) {
+  async function handleCancel(entry: QueueDisplayEntry) {
     if (!identity) return
+    if (entry.optimistic_status) return
     try {
       await cancelEntry(entry.id, identity.token)
       await refresh()
@@ -173,6 +181,14 @@ export default function QueueScreen() {
   const upNext = snapshot.queue.find(
     (e) => e.id !== nowSinging?.id && e.status !== 'SINGING',
   )
+  const liveQueue = queueStore.mergedQueue(snapshot.queue)
+  const myQueue = queueStore.mergedMine(mySongs ?? [], identity.nickname)
+
+  function renderDuration(entry: QueueDisplayEntry): string {
+    if (entry.optimistic_status && entry.duration_seconds === 0) return 'duration resolving'
+    if (entry.duration_seconds === 0) return 'duration unknown'
+    return formatDuration(entry.duration_seconds)
+  }
 
   return (
     <div className="screen">
@@ -261,14 +277,17 @@ export default function QueueScreen() {
           {activeTab === 'queue' ? (
             <section className="queue" role="tabpanel">
               <h2>Tonight&apos;s playlist</h2>
-              {snapshot.queue.length === 0 ? (
+              {liveQueue.length === 0 ? (
                 <p className="muted">No songs yet — add the first one!</p>
               ) : (
                 <ol className="queue-list playlist-list">
-                  {snapshot.queue.map((entry) => {
+                  {liveQueue.map((entry) => {
                     const mine = entry.participant_name === identity.nickname
                     return (
-                      <li key={entry.id} className={mine ? 'mine' : ''}>
+                      <li
+                        key={entry.id}
+                        className={`${mine ? 'mine' : ''}${entry.optimistic_status ? ' optimistic' : ''}`}
+                      >
                         <span className="position">
                           {entry.position ?? '—'}
                         </span>
@@ -279,9 +298,17 @@ export default function QueueScreen() {
                           <strong>{entry.title}</strong>
                           <span className="muted">
                             {entry.participant_name} &middot;{' '}
-                            {formatDuration(entry.duration_seconds)}
+                            {renderDuration(entry)}
                           </span>
-                          {mine && entry.status === 'WAITING' ? (
+                          {entry.optimistic_status ? (
+                            <span className={`badge badge-${entry.optimistic_status}`}>
+                              {entry.optimistic_status === 'syncing' ? 'Syncing' : 'Failed'}
+                            </span>
+                          ) : null}
+                          {entry.optimistic_error ? (
+                            <span className="error-text">{entry.optimistic_error}</span>
+                          ) : null}
+                          {mine && entry.status === 'WAITING' && !entry.optimistic_status ? (
                             <button
                               className="link-button"
                               onClick={() => void handleCancel(entry)}
@@ -299,10 +326,13 @@ export default function QueueScreen() {
           ) : (
             <section className="queue" role="tabpanel">
               <h2>Your playlist</h2>
-              {mySongs && mySongs.length > 0 ? (
+              {myQueue.length > 0 ? (
                 <ol className="queue-list playlist-list">
-                  {mySongs.map((entry) => (
-                    <li key={entry.id} className="mine">
+                  {myQueue.map((entry) => (
+                    <li
+                      key={entry.id}
+                      className={`mine${entry.optimistic_status ? ' optimistic' : ''}`}
+                    >
                       <span className="position">{entry.position ?? '—'}</span>
                       {entry.thumbnail_url ? (
                         <img src={entry.thumbnail_url} alt="" className="entry-thumb" />
@@ -311,9 +341,17 @@ export default function QueueScreen() {
                         <strong>{entry.title}</strong>
                         <span className="muted">
                           {entry.position !== null ? 'This round' : 'Upcoming'}{' '}
-                          &middot; {formatDuration(entry.duration_seconds)}
+                          &middot; {renderDuration(entry)}
                         </span>
-                        {entry.status === 'WAITING' ? (
+                        {entry.optimistic_status ? (
+                          <span className={`badge badge-${entry.optimistic_status}`}>
+                            {entry.optimistic_status === 'syncing' ? 'Syncing' : 'Failed'}
+                          </span>
+                        ) : null}
+                        {entry.optimistic_error ? (
+                          <span className="error-text">{entry.optimistic_error}</span>
+                        ) : null}
+                        {entry.status === 'WAITING' && !entry.optimistic_status ? (
                           <button
                             className="link-button"
                             onClick={() => void handleCancel(entry)}

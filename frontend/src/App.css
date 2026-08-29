@@ -246,6 +246,16 @@ button.link-button {
   color: var(--ended-text);
 }
 
+.badge-syncing {
+  background: var(--paused-bg);
+  color: var(--paused-text);
+}
+
+.badge-failed {
+  background: var(--ended-bg);
+  color: var(--ended-text);
+}
+
 /* --- Cards --------------------------------------------------------------- */
 
 .card {
@@ -317,6 +327,10 @@ button.link-button {
   border-color: var(--primary);
   background:
     linear-gradient(135deg, color-mix(in srgb, var(--surface-2) 82%, var(--primary)), var(--surface-2));
+}
+
+.queue-list li.optimistic {
+  border-style: dashed;
 }
 
 .position {
@@ -608,6 +622,76 @@ button.link-button {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+}
+
+.participant-list-head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-4);
+  align-items: flex-end;
+}
+
+.participant-list-head h2 {
+  margin: 0;
+}
+
+.participant-tile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: var(--space-3);
+}
+
+.participant-tile {
+  min-height: 7rem;
+  padding: var(--space-4);
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: var(--space-3);
+  align-items: center;
+  text-align: left;
+  border: 1px solid var(--border);
+  background:
+    linear-gradient(145deg, color-mix(in srgb, var(--surface) 90%, var(--accent)), var(--surface)),
+    var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-soft);
+}
+
+.participant-tile.selected {
+  border-color: var(--primary);
+  box-shadow: var(--glow-primary), var(--shadow-soft);
+}
+
+.participant-avatar {
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--text-xl);
+  font-weight: 800;
+  background: color-mix(in srgb, var(--primary) 28%, var(--surface-3));
+  color: var(--text);
+}
+
+.participant-tile-copy {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.participant-tile-copy strong,
+.participant-tile-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.participant-detail-panel,
+.participant-empty-detail {
+  border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
 }
 
 .participant-card-head {

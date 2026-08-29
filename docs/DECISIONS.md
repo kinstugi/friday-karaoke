@@ -927,6 +927,39 @@ These freeze MVP product behavior. They were captured in `docs/PRODUCT_SPEC.md`.
 
 ---
 
+## D53. Optimistic song-add UX with keyless oEmbed metadata
+
+- **Status:** Accepted
+- **Decision:** Song-add surfaces use a local-first optimistic UX while preserving
+  D2 backend/database authority. The frontend validates/extracts supported
+  YouTube IDs, fetches keyless oEmbed metadata directly for instant
+  title/channel/thumbnail display when available, stores only non-authoritative
+  video metadata in localStorage, and renders temporary `syncing`/`failed` rows
+  through a shared queue overlay. Client-side oEmbed is best-effort: if YouTube
+  returns 401/404/CORS/network failure, the frontend still shows a generic
+  `Song syncing…` optimistic row and lets the backend submit decide. Participant
+  submit and host participant add still POST to the backend in the background;
+  REST/WebSocket snapshots reconcile the optimistic rows and provide
+  authoritative position, round, duplicate notice, playback, and persistence
+  state.
+- **Backend metadata fallback:** Submit paths normally use the YouTube Data API.
+  If quota/rate limits are exhausted, participant submit and host participant add
+  fall back to server-side oEmbed metadata and still queue the song with
+  `duration_seconds=0`. Preview remains strict because its job is to provide the
+  duration-based long-video warning. A later successful Data API fetch refreshes
+  a previously oEmbed-only video row with real duration/display metadata.
+- **Rationale:** Real school use needs adding songs to feel instant and not fail
+  just because the Data API quota is temporarily exhausted. oEmbed is keyless and
+  quota-free but lacks duration, so the frontend can use it for fast display while
+  the backend retains authority over ordering, rounds, limits, identity, sockets,
+  and durable persistence.
+- **Rejected:** A truly client-authoritative queue with the backend as a dumb
+  relay (would lose refresh/crash durability and create ordering conflicts);
+  keeping the blocking Preview -> Add double round-trip; rejecting songs solely
+  because duration could not be fetched.
+
+---
+
 ## Open questions (tracked)
 
 - ~~Authentication mechanism for hosts (email/password vs. school SSO)~~ — **M3
