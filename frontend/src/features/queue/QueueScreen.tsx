@@ -7,8 +7,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
 
 import { cancelEntry, fetchMyEntries, fetchQueueSnapshot, leaveSession } from '../../api/entries'
-import type { QueueEntry, QueueSnapshot } from '../../api/types'
+import type { QueueEntry } from '../../api/types'
 import { formatDuration } from '../../lib/format'
+import { predictRemoveEntry } from '../../lib/predict'
 import { statusLabel } from '../../lib/session'
 import { clearIdentity, loadIdentity } from '../../lib/token'
 import { useTransitionRemaining } from '../../lib/transition'
@@ -23,18 +24,28 @@ export default function QueueScreen() {
   const { joinCode = '' } = useParams()
   const navigate = useNavigate()
   const queueStore = useQueueStore()
-  const { clearSynced } = queueStore
+  const {
+    clearSynced,
+    setAuthoritativeSnapshot,
+    updateSnapshotStatus,
+    beginOptimisticSnapshot,
+    clearOptimisticSnapshot,
+    markOptimisticRemoval,
+    clearOptimisticRemoval,
+  } = queueStore
   // Read the stored identity once so its reference (and thus the polling
   // effect below) stays stable across renders (avoids a fetch loop).
   const [identity] = useState(loadIdentity)
 
-  const [snapshot, setSnapshot] = useState<QueueSnapshot | null>(null)
   const [mySongs, setMySongs] = useState<QueueEntry[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [connected, setConnected] = useState(false)
   const [notification, setNotification] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<'queue' | 'mine'>('queue')
   const notifyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const snapshot = queueStore.displaySnapshot?.session_id === identity?.sessionId
+    ? queueStore.displaySnapshot
+    : null
 
   const showNotification = useCallback((message: string) => {
     setNotification(message)
@@ -56,14 +67,14 @@ export default function QueueScreen() {
         fetchQueueSnapshot(identity.sessionId),
         fetchMyEntries(identity.sessionId, identity.token),
       ])
-      setSnapshot(snap)
+      setAuthoritativeSnapshot(snap)
       setMySongs(mine)
       clearSynced([...snap.queue, ...mine])
       setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load the queue')
     }
-  }, [clearSynced, identity])
+  }, [clearSynced, identity, setAuthoritativeSnapshot])
 
   // Refresh only the participant's own songs (e.g. after a round advance the
   // host may have processed an entry, removing it from the non-terminal list).
@@ -95,15 +106,13 @@ export default function QueueScreen() {
   useRealtime(identity?.sessionId ?? '', identity?.token ?? '', {
     onEvent: (event) => {
       if (event.type === 'QueueUpdated') {
-        setSnapshot(event.snapshot)
+        setAuthoritativeSnapshot(event.snapshot)
         clearSynced(event.snapshot.queue)
         void refreshMySongs()
       } else if (event.type === 'SessionUpdated') {
         // The snapshot carries the session status too; keep it in sync so the
         // ended banner appears without a queue mutation (M10).
-        setSnapshot((prev) =>
-          prev ? { ...prev, status: event.status } : prev,
-        )
+        updateSnapshotStatus(event.status)
       } else if (event.type === 'NextSingerNotified') {
         // M15 in-app notification: only for the participant it concerns.
         if (identity && event.participant_name === identity.nickname) {
@@ -131,11 +140,17 @@ export default function QueueScreen() {
 
   async function handleCancel(entry: QueueDisplayEntry) {
     if (!identity) return
-    if (entry.optimistic_status) return
+    if (entry.optimistic_status || queueStore.optimisticRemovalIds.has(entry.id)) return
+    markOptimisticRemoval(entry.id)
+    if (snapshot) {
+      beginOptimisticSnapshot(predictRemoveEntry(snapshot, entry.id), `cancel:${entry.id}`)
+    }
     try {
       await cancelEntry(entry.id, identity.token)
       await refresh()
     } catch (err) {
+      clearOptimisticRemoval(entry.id)
+      clearOptimisticSnapshot()
       setError(err instanceof Error ? err.message : 'Could not cancel the entry')
     }
   }
@@ -209,6 +224,9 @@ export default function QueueScreen() {
         </p>
         {!ended ? (
           <p className="badge badge-round">Round {snapshot.round_number}</p>
+        ) : null}
+        {queueStore.pendingAction ? (
+          <p className="badge badge-syncing">Syncing</p>
         ) : null}
       </div>
 

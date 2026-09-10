@@ -960,6 +960,32 @@ These freeze MVP product behavior. They were captured in `docs/PRODUCT_SPEC.md`.
 
 ---
 
+## D54. Optimistic playback and moderation snapshot overlay
+
+- **Status:** Accepted
+- **Decision:** Host playback/moderation actions and participant cancellation use
+  the same temporary optimistic-overlay model as D53. The frontend keeps the last
+  authoritative `QueueSnapshot` from REST/WebSocket and may render a predicted
+  snapshot immediately for start/end/finish/skip/advance/pause/resume, host
+  remove/reorder/edit, session start/end, and participant cancel. The HTTP
+  mutation still runs in the background; the next authoritative snapshot replaces
+  the optimistic one, and a failed mutation clears the overlay to revert the UI
+  and surface an error. Snapshot payloads now expose `cooldown_seconds` and
+  `countdown_seconds` so optimistic transition deadlines match per-session
+  configuration.
+- **Rationale:** During a live performance, a host pressing **Finish** or
+  **Skip** needs the projector UI to move immediately even if the school network
+  adds latency. This is a UI responsiveness layer only: backend/database remains
+  authoritative for queue order, statuses, rounds, playback, permissions,
+  identity, and persistence; WebSockets/polling reconcile any prediction drift.
+- **Trade-off:** The client mirrors a small part of the playback state machine for
+  display, so rare edge cases (round boundaries, another tab acting first, socket
+  loss) can briefly differ from the backend. The overlay is intentionally
+  temporary and is replaced by REST/WebSocket snapshots or reverted on API
+  failure.
+
+---
+
 ## Open questions (tracked)
 
 - ~~Authentication mechanism for hosts (email/password vs. school SSO)~~ — **M3

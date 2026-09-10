@@ -1,6 +1,6 @@
 import { createContext, useContext } from 'react'
 
-import type { QueueEntry, SongSubmitResult } from '../api/types'
+import type { QueueEntry, QueueSnapshot, SessionStatus, SongSubmitResult } from '../api/types'
 import type { ClientVideoMetadata } from '../lib/youtube'
 
 export type OptimisticStatus = 'syncing' | 'failed'
@@ -33,7 +33,18 @@ export interface HostAddInput extends BaseAddInput {
 }
 
 export interface QueueContextValue {
+  authoritativeSnapshot: QueueSnapshot | null
+  displaySnapshot: QueueSnapshot | null
+  pendingAction: string | null
+  optimisticRemovalIds: Set<string>
   optimisticEntries: QueueDisplayEntry[]
+  setAuthoritativeSnapshot: (snapshot: QueueSnapshot) => void
+  updateSnapshotStatus: (status: SessionStatus) => void
+  beginOptimisticSnapshot: (snapshot: QueueSnapshot, action: string) => void
+  clearOptimisticSnapshot: () => void
+  markOptimisticRemoval: (entryId: string) => void
+  clearOptimisticRemoval: (entryId: string) => void
+  clearOptimisticRemovals: () => void
   mergedQueue: (queue: QueueEntry[]) => QueueDisplayEntry[]
   mergedMine: (entries: QueueEntry[], participantName: string) => QueueDisplayEntry[]
   addParticipantSong: (input: BaseAddInput) => Promise<SongSubmitResult>

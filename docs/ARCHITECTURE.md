@@ -26,8 +26,8 @@ the intended target state for v1.
 
 - **Frontend** — React + TypeScript SPA built with Vite. Two main surfaces:
   participant flow (mobile-first) and host dashboard. Serves the QR join flow and
-  the host playback UI. No authoritative state; D53 adds only a temporary
-  optimistic overlay for instant song-add UX.
+  the host playback UI. No authoritative state; D53/D54 add only temporary
+  optimistic overlays for instant song-add, host control, and cancel UX.
 - **Backend** — FastAPI modular monolith. Owns all authoritative state:
   queue order, current singer, round state, playback state, permissions,
   participant identity, session state.
@@ -167,9 +167,10 @@ Frontend rules (all in effect at M8/M9/M9.1, updated by D53):
   The only durable client-side persistence is participant identity
   (token/session), host identity (token/email), and a non-authoritative YouTube
   metadata cache in localStorage (D38/D39/E8/D53). The frontend may keep a
-  temporary optimistic queue overlay for instant adds, but it is reconciled by
-  the next authoritative REST/WebSocket snapshot and never decides order,
-  position, rounds, playback, permissions, or persistence.
+  temporary optimistic queue/snapshot overlay for instant adds, playback,
+  moderation, and cancellation, but it is reconciled by the next authoritative
+  REST/WebSocket snapshot and never decides order, position, rounds, playback,
+  permissions, or persistence.
 - The `frontend-ui` skill (`.opencode/skills/frontend-ui/SKILL.md`) is the
   frontend quality bar: design tokens (CSS variables in `src/index.css`), the
   two-surface layout rules (mobile-first participant vs projector/TV host),
@@ -194,10 +195,10 @@ Frontend rules (all in effect at M8/M9/M9.1, updated by D53):
 Participant phone                   Host browser
      |                                   |
      | keyless oEmbed title/thumb       | host action (skip/remove/...)
-     | optimistic local row             |
-     | background submit URL            |
+     | optimistic local row/cancel      | optimistic snapshot patch
+     | background submit/cancel         | background mutation
      v                                   v
-Backend (validates URL, fetches/falls back to metadata, appends queue entry)
+Backend (validates/authorizes mutation and persists authoritative state)
      |
      | persists to PostgreSQL
      v
@@ -208,7 +209,9 @@ Participant phone updates            Host dashboard updates
 ```
 
 Realtime is a notification channel. If it fails, participants can still reload and
-get correct state from the API.
+get correct state from the API. Optimistic client predictions are temporary UI
+only: the next REST/WebSocket snapshot replaces them, and failed mutations clear
+the overlay and revert to the last authoritative snapshot (D54).
 
 ## 6. Playback architecture (target)
 

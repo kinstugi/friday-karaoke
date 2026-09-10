@@ -277,6 +277,8 @@ GET /api/v1/sessions/{id}/entries                # public, no auth
   "playback_state": "PLAYING",                   # stored (M13, D47)
   "transition_until": null,                      # transition deadline (M13)
   "transition_remaining_seconds": null,          # countdown display (M13)
+  "cooldown_seconds": 10,                        # per-session timing (M13/D54)
+  "countdown_seconds": 20,                       # per-session timing (M13/D54)
   "participants": [ { "nickname": "Alice", "remaining_songs": 2 }, ... ],  # M16
   "queue": [ { ...QueueEntryResponse as above, "position": 1 }, ... ]
 }                                                # current round, stable participant order (D43)
@@ -288,7 +290,10 @@ participant order (each participant's earliest submission time; decision D43);
 future-round songs are not part of the snapshot and have no position. There is no
 mutable position field. `rounds_completed` counts the rounds fully played and
 `participants` the per-participant remaining-song counts (M16). The snapshot is
-sanitized (no host identity, no participant tokens).
+sanitized (no host identity, no participant tokens). `cooldown_seconds` and
+`countdown_seconds` are exposed so clients can render temporary optimistic
+transition UI while awaiting the next authoritative snapshot; backend deadlines
+remain authoritative.
 
 ### Session summary (M16)
 

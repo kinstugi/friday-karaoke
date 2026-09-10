@@ -367,11 +367,22 @@ EOF
 
 - The snapshot exposes `transition_until` and `transition_remaining_seconds`;
   the countdown auto-advances and a reopened tab with an overdue deadline
-  self-recovers (no background timers, D47).
+  self-recovers (no background timers, D47). It also exposes per-session
+  `cooldown_seconds` and `countdown_seconds` so the frontend can render temporary
+  optimistic transition deadlines before REST/WebSocket reconciliation (D54).
 - Host `skip`/`finish` skip the cooldown and go straight to the countdown (D20);
   `start` cancels a pending transition; `pause` cancels it too (E22).
 - Covered by `backend/tests/test_playback.py` (8 transition tests) and the live
   smoke above.
+
+## Optimistic UI smoke (D54)
+
+With backend + frontend running, open a host dashboard and a participant queue in
+separate browser windows. Press **Finish**, **Skip**, **Remove**, reorder arrows,
+and participant **Cancel**: the visible queue/playback state should update
+immediately and show a small syncing badge until the REST/WebSocket snapshot
+arrives. Temporarily block the request in DevTools/network to verify the UI
+reverts to the previous authoritative snapshot and shows an error.
 
 ## Host moderation verification (M14)
 

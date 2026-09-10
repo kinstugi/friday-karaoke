@@ -106,6 +106,8 @@ export interface QueueSnapshot {
   playback_state: PlaybackState
   transition_until: string | null
   transition_remaining_seconds: number | null
+  cooldown_seconds: number
+  countdown_seconds: number
   participants: QueueParticipant[]
   queue: QueueEntry[]
 }

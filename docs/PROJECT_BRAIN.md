@@ -82,8 +82,8 @@ Scan QR
 - Backend/database is the **single source of truth** for queue order, current singer,
   round state, playback state, permissions, participant identity, and session state.
 - Frontend is a React + TypeScript SPA (Vite). It never owns authoritative state;
-  it can keep a temporary optimistic overlay for instant song-add UX, reconciled
-  by backend snapshots (D53).
+  it can keep temporary optimistic overlays for instant song-add, playback,
+  moderation, and cancel UX, reconciled by backend snapshots (D53/D54).
 - Realtime delivery via **FastAPI WebSockets** (implemented M10). WebSockets are a delivery
   mechanism, **not** the source of truth; clients resync from the backend after reconnect.
 - **Queue rounds** (M10.1): the queue is round-robin — one song per participant per
@@ -200,6 +200,12 @@ participant playlist view, and host add-song flow. M18 is complete; see
   Backend submit/host-add degrade gracefully on Data API quota/rate limits by
   falling back to oEmbed metadata (`duration_seconds=0`), while preview remains
   strict for duration warnings.
+- **Optimistic playback/moderation follow-up** (backend + frontend): queue
+  snapshots expose per-session `cooldown_seconds`/`countdown_seconds`; the shared
+  frontend queue store now holds the authoritative snapshot plus a temporary
+  optimistic snapshot. Host playback, start/end, remove/reorder/edit, and
+  participant cancel update instantly, then reconcile via REST/WebSocket or
+  revert with an error on failure (D54).
 - **M17 — Security + abuse protection** (complete, backend): in-process fixed-
   window rate limiting on the public QR surface (`app/core/ratelimit.py`, D49) —
   join 10/min/IP, preview 20/min/IP, submit 20/min/IP → 429; a YouTube metadata
@@ -470,8 +476,9 @@ See `docs/DECISIONS.md` for the full, maintained list. Highlights:
   service now distinguishes YouTube quota/rate-limit exhaustion as 503 instead
   of a video-unavailable 404; the rest of the abuse-protection checklist was
   already in place (D49).
-- Optimistic queue UX (D53): client-side oEmbed metadata and temporary optimistic
-  rows make adds instant; backend/database still owns order, rounds, playback,
+- Optimistic queue/playback UX (D53/D54): client-side oEmbed metadata,
+  temporary optimistic rows, and temporary optimistic snapshots make adds and
+  host controls instant; backend/database still owns order, rounds, playback,
   permissions, identity, session state, and durable queue persistence.
 - No user-visible feature in M0 beyond a health check.
 

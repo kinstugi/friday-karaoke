@@ -5,7 +5,7 @@ import { type ReactNode, useCallback, useMemo, useState } from 'react'
 
 import { submitSong } from '../api/entries'
 import { addHostParticipantSong } from '../api/host'
-import type { QueueEntry, SongSubmitResult } from '../api/types'
+import type { QueueEntry, QueueSnapshot, SessionStatus, SongSubmitResult } from '../api/types'
 import { cacheQueueEntryMetadata } from '../lib/youtube'
 import {
   type BaseAddInput,
@@ -46,7 +46,44 @@ function isConfirmedBySnapshot(entry: QueueDisplayEntry, snapshotEntries: Cachea
 }
 
 export function QueueProvider({ children }: { children: ReactNode }) {
+  const [authoritativeSnapshot, setAuthoritativeSnapshotState] = useState<QueueSnapshot | null>(null)
+  const [optimisticSnapshot, setOptimisticSnapshot] = useState<QueueSnapshot | null>(null)
+  const [pendingAction, setPendingAction] = useState<string | null>(null)
+  const [optimisticRemovalIds, setOptimisticRemovalIds] = useState<Set<string>>(new Set())
   const [optimisticEntries, setOptimisticEntries] = useState<QueueDisplayEntry[]>([])
+
+  const updateSnapshotStatus = useCallback((status: SessionStatus): void => {
+    setAuthoritativeSnapshotState((prev) => (prev ? { ...prev, status } : prev))
+    setOptimisticSnapshot((prev) => (prev ? { ...prev, status } : prev))
+  }, [])
+
+  const beginOptimisticSnapshot = useCallback((snapshot: QueueSnapshot, action: string): void => {
+    setOptimisticSnapshot(snapshot)
+    setPendingAction(action)
+  }, [])
+
+  const clearOptimisticSnapshot = useCallback((): void => {
+    setOptimisticSnapshot(null)
+    setPendingAction(null)
+  }, [])
+
+  const markOptimisticRemoval = useCallback((entryId: string): void => {
+    setOptimisticRemovalIds((prev) => new Set(prev).add(entryId))
+  }, [])
+
+  const clearOptimisticRemoval = useCallback((entryId: string): void => {
+    setOptimisticRemovalIds((prev) => {
+      const next = new Set(prev)
+      next.delete(entryId)
+      return next
+    })
+  }, [])
+
+  const clearOptimisticRemovals = useCallback((): void => {
+    setOptimisticRemovalIds(new Set())
+  }, [])
+
+  const displaySnapshot = optimisticSnapshot ?? authoritativeSnapshot
 
   const clearSynced = useCallback((entries: CacheableEntry[]): void => {
     setOptimisticEntries((prev) =>
@@ -55,26 +92,36 @@ export function QueueProvider({ children }: { children: ReactNode }) {
     entries.forEach(cacheQueueEntryMetadata)
   }, [])
 
+  const setAuthoritativeSnapshot = useCallback((snapshot: QueueSnapshot): void => {
+    setAuthoritativeSnapshotState(snapshot)
+    setOptimisticSnapshot(null)
+    setPendingAction(null)
+    setOptimisticRemovalIds(new Set())
+    clearSynced(snapshot.queue)
+  }, [clearSynced])
+
   const mergedQueue = useCallback((queue: QueueEntry[]): QueueDisplayEntry[] => {
-    const hiddenServerIds = new Set(queue.map((entry) => entry.id))
+    const filteredQueue = queue.filter((entry) => !optimisticRemovalIds.has(entry.id))
+    const hiddenServerIds = new Set(filteredQueue.map((entry) => entry.id))
     const visibleOptimistic = optimisticEntries.filter(
       (entry) => !entry.server_id || !hiddenServerIds.has(entry.server_id),
     )
-    return [...queue, ...visibleOptimistic]
-  }, [optimisticEntries])
+    return [...filteredQueue, ...visibleOptimistic]
+  }, [optimisticEntries, optimisticRemovalIds])
 
   const mergedMine = useCallback((
     entries: QueueEntry[],
     participantName: string,
   ): QueueDisplayEntry[] => {
-    const hiddenServerIds = new Set(entries.map((entry) => entry.id))
+    const filteredEntries = entries.filter((entry) => !optimisticRemovalIds.has(entry.id))
+    const hiddenServerIds = new Set(filteredEntries.map((entry) => entry.id))
     const mine = optimisticEntries.filter(
       (entry) =>
         entry.participant_name === participantName &&
         (!entry.server_id || !hiddenServerIds.has(entry.server_id)),
     )
-    return [...entries, ...mine]
-  }, [optimisticEntries])
+    return [...filteredEntries, ...mine]
+  }, [optimisticEntries, optimisticRemovalIds])
 
   const addParticipantSong = useCallback(async (
     input: BaseAddInput,
@@ -139,7 +186,18 @@ export function QueueProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<QueueContextValue>(
     () => ({
+      authoritativeSnapshot,
+      displaySnapshot,
+      pendingAction,
+      optimisticRemovalIds,
       optimisticEntries,
+      setAuthoritativeSnapshot,
+      updateSnapshotStatus,
+      beginOptimisticSnapshot,
+      clearOptimisticSnapshot,
+      markOptimisticRemoval,
+      clearOptimisticRemoval,
+      clearOptimisticRemovals,
       mergedQueue,
       mergedMine,
       addParticipantSong,
@@ -147,7 +205,18 @@ export function QueueProvider({ children }: { children: ReactNode }) {
       clearSynced,
     }),
     [
+      authoritativeSnapshot,
+      displaySnapshot,
+      pendingAction,
+      optimisticRemovalIds,
       optimisticEntries,
+      setAuthoritativeSnapshot,
+      updateSnapshotStatus,
+      beginOptimisticSnapshot,
+      clearOptimisticSnapshot,
+      markOptimisticRemoval,
+      clearOptimisticRemoval,
+      clearOptimisticRemovals,
       mergedQueue,
       mergedMine,
       addParticipantSong,

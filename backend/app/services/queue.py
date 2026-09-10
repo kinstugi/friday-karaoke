@@ -251,6 +251,8 @@ class QueueService:
             playback_state=karaoke.playback_state,
             transition_until=karaoke.transition_until,
             transition_remaining_seconds=remaining,
+            cooldown_seconds=karaoke.cooldown_seconds,
+            countdown_seconds=karaoke.countdown_seconds,
             participants=await self.participant_summaries(session, session_id),
             queue=[
                 self.entry_response(entry, index)

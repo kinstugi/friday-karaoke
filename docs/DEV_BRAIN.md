@@ -11,7 +11,19 @@ of every milestone. The persistent context lives in `PROJECT_BRAIN.md`.
 
 ## Current task
 
-**Optimistic queue + keyless metadata (D53) — IMPLEMENTED, verified locally; host participant UI follow-up applied.**
+**Optimistic playback/moderation follow-up (D54) — IMPLEMENTED, verification in progress.**
+
+This follow-up extends the D53 instant-add UX to the rest of the live queue
+surface. Queue snapshots now expose `cooldown_seconds` and `countdown_seconds`,
+and the shared frontend queue store holds the last authoritative snapshot plus a
+temporary optimistic snapshot. Host dashboard actions — session start/end,
+playback start/end/finish/skip/advance/pause/resume, host remove/reorder/edit —
+render immediately, fire the backend mutation in the background, reconcile from
+REST/WebSocket snapshots, and revert to the last authoritative snapshot on
+failure. Participant cancel also hides the row immediately and restores it on
+failure. The host UI shows a subtle syncing badge while a prediction is pending.
+
+Previous task: **Optimistic queue + keyless metadata (D53) — IMPLEMENTED, verified locally; host participant UI follow-up applied.**
 
 Phase 2 moved song adding to an optimistic/local-first UX while keeping the
 backend/database authoritative. The frontend now has `QueueProvider`/

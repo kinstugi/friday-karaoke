@@ -569,6 +569,11 @@ button.link-button {
   opacity: 0.45;
 }
 
+.host-sync-badge {
+  align-self: flex-start;
+  margin-top: var(--space-1);
+}
+
 .host-queue li {
   align-items: center;
   gap: 1rem;
