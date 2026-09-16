@@ -10,7 +10,7 @@ export function useHostSessions(hostId: string | undefined) {
     if (!hostId) { setSessions([]); setLoading(false); return }
     setLoading(true)
     setError('')
-    return subscribeToHostSessions(hostId, (nextSessions) => { setSessions(nextSessions); setLoading(false) }, (snapshotError) => { setError(snapshotError.message); setLoading(false) })
+    return subscribeToHostSessions(hostId, (nextSessions) => { setSessions(nextSessions); setLoading(false) }, (snapshotError) => { console.error('Firestore sessions listener failed:', snapshotError); setError(`${snapshotError.name}: ${snapshotError.message}`); setLoading(false) })
   }, [hostId])
 
   return { sessions, loading, error }
