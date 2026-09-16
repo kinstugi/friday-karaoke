@@ -19,7 +19,7 @@ function authErrorMessage(error: unknown) {
   }
 }
 
-function AuthPage({ onBack }: { onBack: () => void }) {
+function AuthPage({ onBack, onAuthenticated }: { onBack: () => void; onAuthenticated: () => void }) {
   const { signIn, signUp, signInWithGoogle } = useAuth()
   const [isSignUp, setIsSignUp] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
@@ -36,7 +36,7 @@ function AuthPage({ onBack }: { onBack: () => void }) {
     try {
       if (isSignUp) await signUp(email, password)
       else await signIn(email, password)
-      setSuccess(true)
+      onAuthenticated()
     } catch (authError) {
       setError(authErrorMessage(authError))
     } finally {
@@ -49,7 +49,7 @@ function AuthPage({ onBack }: { onBack: () => void }) {
     setBusy(true)
     try {
       await signInWithGoogle()
-      setSuccess(true)
+      onAuthenticated()
     } catch (authError) {
       setError(authErrorMessage(authError))
     } finally {

@@ -1,0 +1,4 @@
+.dashboard-orb { position: absolute; width: 420px; height: 420px; border-radius: 50%; filter: blur(90px); opacity: .16; pointer-events: none; animation: float 12s ease-in-out infinite; }
+.orb-one { top: 100px; right: -150px; background: #ec7197; }
+.orb-two { bottom: -180px; left: -130px; background: #646cff; animation-delay: -5s; }
+@keyframes float { 0%, 100% { transform: translate(0, 0) scale(1); } 50% { transform: translate(-25px, 20px) scale(1.08); } }
