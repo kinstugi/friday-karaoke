@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup, signOut, type User } from 'firebase/auth'
+import { onAuthStateChanged, signInAnonymously, signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup, signOut, type User } from 'firebase/auth'
 import { auth, googleProvider } from '../lib/firebase'
 
 type AuthContextValue = {
@@ -8,6 +8,7 @@ type AuthContextValue = {
   signIn: (email: string, password: string) => Promise<void>
   signUp: (email: string, password: string) => Promise<void>
   signInWithGoogle: () => Promise<void>
+  signInAnonymously: () => Promise<void>
   logOut: () => Promise<void>
 }
 
@@ -28,6 +29,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     signIn: (email: string, password: string) => signInWithEmailAndPassword(auth, email, password).then(() => undefined),
     signUp: (email: string, password: string) => createUserWithEmailAndPassword(auth, email, password).then(() => undefined),
     signInWithGoogle: () => signInWithPopup(auth, googleProvider).then(() => undefined),
+    signInAnonymously: () => signInAnonymously(auth).then(() => undefined),
     logOut: () => signOut(auth),
   }), [user, loading])
 

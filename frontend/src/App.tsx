@@ -6,6 +6,7 @@ import AuthPage from './pages/AuthPage'
 import HostDashboard from './pages/HostDashboard'
 import CreateSessionPage from './pages/CreateSessionPage'
 import RoomPage from './pages/RoomPage'
+import JoinRoomPage from './pages/JoinRoomPage'
 
 const theme = createTheme({
   palette: {
@@ -24,9 +25,10 @@ const theme = createTheme({
 })
 
 function App() {
-  const [page, setPage] = useState<'landing' | 'auth' | 'dashboard' | 'create' | 'room'>('landing')
+  const joinCode = window.location.pathname.match(/^\/join\/([^/]+)/)?.[1]
+  const [page, setPage] = useState<'landing' | 'auth' | 'dashboard' | 'create' | 'room' | 'join'>(joinCode ? 'join' : 'landing')
   const [room, setRoom] = useState({ title: 'Singalong Session', code: 'SING-42' })
-  return <ThemeProvider theme={theme}><CssBaseline />{page === 'landing' ? <LandingPage onOpenAuth={() => setPage('auth')} /> : page === 'auth' ? <AuthPage onBack={() => setPage('landing')} onAuthenticated={() => setPage('dashboard')} /> : page === 'create' ? <CreateSessionPage onBack={() => setPage('dashboard')} onCreated={() => setPage('dashboard')} /> : page === 'room' ? <RoomPage title={room.title} code={room.code} onExit={() => setPage('dashboard')} /> : <HostDashboard onSignOut={() => setPage('landing')} onCreateSession={() => setPage('create')} onOpenSession={(title, code) => { setRoom({ title, code }); setPage('room') }} />}</ThemeProvider>
+  return <ThemeProvider theme={theme}><CssBaseline />{page === 'landing' ? <LandingPage onOpenAuth={() => setPage('auth')} /> : page === 'auth' ? <AuthPage onBack={() => setPage('landing')} onAuthenticated={() => setPage('dashboard')} /> : page === 'create' ? <CreateSessionPage onBack={() => setPage('dashboard')} onCreated={() => setPage('dashboard')} /> : page === 'room' ? <RoomPage title={room.title} code={room.code} onExit={() => setPage('dashboard')} /> : page === 'join' && joinCode ? <JoinRoomPage code={joinCode} onBack={() => setPage('landing')} /> : <HostDashboard onSignOut={() => setPage('landing')} onCreateSession={() => setPage('create')} onOpenSession={(title, code) => { setRoom({ title, code }); setPage('room') }} />}</ThemeProvider>
 }
 
 export default App

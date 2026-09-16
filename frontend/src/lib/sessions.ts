@@ -1,4 +1,4 @@
-import { addDoc, collection, onSnapshot, query, serverTimestamp, where, type Unsubscribe } from 'firebase/firestore'
+import { addDoc, collection, getDocs, onSnapshot, query, serverTimestamp, where, type Unsubscribe } from 'firebase/firestore'
 import { db } from './firebase'
 
 export type KaraokeSession = {
@@ -24,6 +24,14 @@ export async function createSession(hostId: string, title: string) {
     guestsCount: 0,
     createdAt: serverTimestamp(),
   })
+}
+
+export async function findSessionByCode(roomCode: string) {
+  const snapshot = await getDocs(query(collection(db, 'sessions'), where('roomCode', '==', roomCode.toUpperCase())))
+  const session = snapshot.docs[0]
+  if (!session) return null
+  const data = session.data()
+  return { id: session.id, title: data.title as string, hostId: data.hostId as string, roomCode: data.roomCode as string }
 }
 
 export function subscribeToHostSessions(hostId: string, onChange: (sessions: KaraokeSession[]) => void, onError: (error: Error) => void): Unsubscribe {
