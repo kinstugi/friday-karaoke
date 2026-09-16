@@ -1,4 +1,4 @@
-import { addDoc, collection, getDocs, onSnapshot, query, serverTimestamp, where, type Unsubscribe } from 'firebase/firestore'
+import { addDoc, collection, doc, getDocs, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where, type Unsubscribe } from 'firebase/firestore'
 import { db } from './firebase'
 
 export type KaraokeSession = {
@@ -10,6 +10,8 @@ export type KaraokeSession = {
   guestsCount: number
   createdAt: Date | null
 }
+
+export type SessionParticipant = { id: string; nickname: string; joinedAt: Date | null; visibility: boolean; addedByHost?: boolean }
 
 function createRoomCode() {
   return Math.random().toString(36).slice(2, 8).toUpperCase()
@@ -33,6 +35,43 @@ export async function findSessionByCode(roomCode: string) {
   const data = session.data()
   return { id: session.id, title: data.title as string, hostId: data.hostId as string, roomCode: data.roomCode as string }
 }
+
+export async function joinSession(sessionId: string, userId: string, nickname: string) {
+  await setDoc(doc(db, 'sessions', sessionId, 'participants', userId), {
+    nickname: nickname.trim(),
+    joinedAt: serverTimestamp(),
+    lastSeenAt: serverTimestamp(),
+    visibility: true,
+  }, { merge: true })
+}
+
+export async function addHostParticipant(sessionId: string, nickname: string) {
+  const participantId = `host-${crypto.randomUUID()}`
+  await setDoc(doc(db, 'sessions', sessionId, 'participants', participantId), {
+    nickname: nickname.trim(),
+    joinedAt: serverTimestamp(),
+    lastSeenAt: serverTimestamp(),
+    visibility: true,
+    addedByHost: true,
+  })
+}
+
+export function subscribeToParticipants(sessionId: string, onChange: (participants: SessionParticipant[]) => void, onError: (error: Error) => void): Unsubscribe {
+  return onSnapshot(collection(db, 'sessions', sessionId, 'participants'), (snapshot) => {
+    const participants = snapshot.docs.map((participantDoc) => {
+      const data = participantDoc.data()
+      // Only an explicit boolean false means unavailable. This keeps older
+      // participant documents visible until they are updated again.
+      return { id: participantDoc.id, nickname: data.nickname as string, joinedAt: data.joinedAt?.toDate?.() ?? null, visibility: data.visibility !== false, addedByHost: data.addedByHost === true }
+    }).sort((a, b) => (a.joinedAt?.getTime() ?? 0) - (b.joinedAt?.getTime() ?? 0))
+    onChange(participants)
+  }, onError)
+}
+
+export async function setParticipantVisibility(sessionId: string, participantId: string, visibility: boolean) {
+  await updateDoc(doc(db, 'sessions', sessionId, 'participants', participantId), { visibility, lastSeenAt: serverTimestamp() })
+}
+
 
 export function subscribeToHostSessions(hostId: string, onChange: (sessions: KaraokeSession[]) => void, onError: (error: Error) => void): Unsubscribe {
   const sessionsQuery = query(collection(db, 'sessions'), where('hostId', '==', hostId))

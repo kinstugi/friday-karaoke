@@ -8,7 +8,7 @@ type AuthContextValue = {
   signIn: (email: string, password: string) => Promise<void>
   signUp: (email: string, password: string) => Promise<void>
   signInWithGoogle: () => Promise<void>
-  signInAnonymously: () => Promise<void>
+  signInAnonymously: () => Promise<User>
   logOut: () => Promise<void>
 }
 
@@ -29,7 +29,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     signIn: (email: string, password: string) => signInWithEmailAndPassword(auth, email, password).then(() => undefined),
     signUp: (email: string, password: string) => createUserWithEmailAndPassword(auth, email, password).then(() => undefined),
     signInWithGoogle: () => signInWithPopup(auth, googleProvider).then(() => undefined),
-    signInAnonymously: () => signInAnonymously(auth).then(() => undefined),
+    signInAnonymously: () => signInAnonymously(auth).then((credential) => credential.user),
     logOut: () => signOut(auth),
   }), [user, loading])
 

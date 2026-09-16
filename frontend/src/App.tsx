@@ -27,8 +27,8 @@ const theme = createTheme({
 function App() {
   const joinCode = window.location.pathname.match(/^\/join\/([^/]+)/)?.[1]
   const [page, setPage] = useState<'landing' | 'auth' | 'dashboard' | 'create' | 'room' | 'join'>(joinCode ? 'join' : 'landing')
-  const [room, setRoom] = useState({ title: 'Singalong Session', code: 'SING-42' })
-  return <ThemeProvider theme={theme}><CssBaseline />{page === 'landing' ? <LandingPage onOpenAuth={() => setPage('auth')} /> : page === 'auth' ? <AuthPage onBack={() => setPage('landing')} onAuthenticated={() => setPage('dashboard')} /> : page === 'create' ? <CreateSessionPage onBack={() => setPage('dashboard')} onCreated={() => setPage('dashboard')} /> : page === 'room' ? <RoomPage title={room.title} code={room.code} onExit={() => setPage('dashboard')} /> : page === 'join' && joinCode ? <JoinRoomPage code={joinCode} onBack={() => setPage('landing')} /> : <HostDashboard onSignOut={() => setPage('landing')} onCreateSession={() => setPage('create')} onOpenSession={(title, code) => { setRoom({ title, code }); setPage('room') }} />}</ThemeProvider>
+  const [room, setRoom] = useState({ title: 'Singalong Session', code: 'SING-42', sessionId: '' })
+  return <ThemeProvider theme={theme}><CssBaseline />{page === 'landing' ? <LandingPage onOpenAuth={() => setPage('auth')} /> : page === 'auth' ? <AuthPage onBack={() => setPage('landing')} onAuthenticated={() => setPage('dashboard')} /> : page === 'create' ? <CreateSessionPage onBack={() => setPage('dashboard')} onCreated={() => setPage('dashboard')} /> : page === 'room' ? <RoomPage title={room.title} code={room.code} sessionId={room.sessionId} onExit={() => setPage('dashboard')} /> : page === 'join' && joinCode ? <JoinRoomPage code={joinCode} onBack={() => setPage('landing')} /> : <HostDashboard onSignOut={() => setPage('landing')} onCreateSession={() => setPage('create')} onOpenSession={(title, code, sessionId) => { setRoom({ title, code, sessionId }); setPage('room') }} />}</ThemeProvider>
 }
 
 export default App
