@@ -26,13 +26,11 @@ import ShareRoundedIcon from "@mui/icons-material/ShareRounded";
 import SkipNextRoundedIcon from "@mui/icons-material/SkipNextRounded";
 import StopCircleRoundedIcon from "@mui/icons-material/StopCircleRounded";
 import { useSessionParticipants } from "../hooks/useSessionParticipants";
-import { useSessionSongs } from "../hooks/useSessionSongs";
 import {
   deleteParticipant,
-  getQueueSongs,
   setParticipantVisibility,
+  setSessionNowSinging,
   type SessionParticipant,
-  type SessionSong,
 } from "../lib/sessions";
 import ParticipantList, { moveItem } from "../components/room/ParticipantList";
 import RoomActionCard from "../components/room/RoomActionCard";
@@ -56,7 +54,6 @@ function RoomPage({
   onExit: () => void;
 }) {
   const { participants } = useSessionParticipants(sessionId);
-  const { songs } = useSessionSongs(sessionId);
   const [orderedIds, setOrderedIds] = useState<string[]>([]);
   const [panel, setPanel] = useState<Panel>(null);
   const [expanded, setExpanded] = useState(false);
@@ -88,7 +85,10 @@ function RoomPage({
     const firstAvailable = orderedParticipants.find(
       (participant) => participant.visibility,
     );
-    if (firstAvailable) setCurrentParticipantId(firstAvailable.id);
+    if (firstAvailable) {
+      setCurrentParticipantId(firstAvailable.id);
+      void setSessionNowSinging(sessionId, firstAvailable.id);
+    }
   };
   const nextParticipant = () => {
     const availableParticipants = orderedParticipants.filter(
@@ -101,6 +101,7 @@ function RoomPage({
     const nextIndex =
       currentIndex < 0 ? 0 : (currentIndex + 1) % availableParticipants.length;
     setCurrentParticipantId(availableParticipants[nextIndex].id);
+    void setSessionNowSinging(sessionId, availableParticipants[nextIndex].id);
   };
 
   return (
@@ -327,7 +328,7 @@ function RoomPage({
               <RoomActionCard
                 icon={<QueueMusicRoundedIcon />}
                 title="Manage queue"
-                subtitle={`${getQueueSongs(songs).length} active songs`}
+                subtitle={`${orderedParticipants.filter((participant) => participant.visibility).length} active singers`}
                 onClick={() => openPanel("queue")}
               />
             </Grid>
@@ -434,7 +435,7 @@ function RoomPage({
         </Stack>
         <Divider sx={{ my: 3, borderColor: "rgba(255,255,255,.1)" }} />
         {panel === "queue" ? (
-          <QueuePanel songs={songs} />
+          <QueuePanel participants={participants} />
         ) : panel === "guests" ? (
           <GuestsPanel participants={participants} sessionId={sessionId} />
         ) : (

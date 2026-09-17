@@ -4,6 +4,7 @@ import {
   Avatar,
   Box,
   Button,
+  Chip,
   CircularProgress,
   Container,
   Dialog,
@@ -40,13 +41,14 @@ import {
   addSong,
   deleteSong,
   findSessionByCode,
-  getQueueSongs,
   joinSession,
   setParticipantVisibility,
+  type SessionParticipant,
   type SessionSong,
 } from "../lib/sessions";
-import { useSessionSongs } from "../hooks/useSessionSongs";
 import { useParticipantSongs } from "../hooks/useParticipantSongs";
+import { useSessionParticipants } from "../hooks/useSessionParticipants";
+import { useSessionState } from "../hooks/useSessionState";
 
 function JoinRoomPage({ code, onBack }: { code: string; onBack: () => void }) {
   const { signInAnonymously } = useAuth();
@@ -203,7 +205,9 @@ function ParticipantRoom({
   sessionId: string;
   participantId: string;
 }) {
-  const { songs: queueSongs, error: songsError } = useSessionSongs(sessionId);
+  const { participants, error: participantsError } =
+    useSessionParticipants(sessionId);
+  const { activeParticipantId } = useSessionState(sessionId);
   const { songs: personalSongs, error: personalSongsError } =
     useParticipantSongs(sessionId, participantId);
   const [available, setAvailable] = useState(true);
@@ -216,7 +220,19 @@ function ParticipantRoom({
   const [titleLoading, setTitleLoading] = useState(false);
   const [titleFetchFailed, setTitleFetchFailed] = useState(false);
   const [added, setAdded] = useState(false);
-  const visibleSongs = tab === 0 ? getQueueSongs(queueSongs) : personalSongs;
+  const visibleSongs = tab === 0 ? [] : personalSongs;
+  const activeParticipant = participants.find(
+    (participant) =>
+      participant.id === activeParticipantId && participant.visibility,
+  );
+  const activeParticipants = participants.filter(
+    (participant) => participant.visibility,
+  );
+  const participantPosition = activeParticipants.findIndex(
+    (participant) => participant.id === participantId,
+  );
+  const peopleAhead = participantPosition < 0 ? 0 : participantPosition;
+  const isYourTurn = activeParticipant?.id === participantId;
 
   async function toggleAvailability() {
     if (!participantId || saving) return;
@@ -336,32 +352,57 @@ function ParticipantRoom({
               color="secondary.main"
               letterSpacing=".14em"
             >
-              NOW PLAYING
+              ROOM STATUS
             </Typography>
             <Typography
               variant="h4"
               fontWeight={700}
               sx={{ fontSize: { xs: "1.8rem", md: "2.5rem" } }}
             >
-              Waiting for the first song
+              {isYourTurn
+                ? "You’re singing now!"
+                : activeParticipant
+                  ? `${activeParticipant.nickname} is singing`
+                  : peopleAhead === 0
+                    ? "You’re next"
+                    : `${peopleAhead} ${peopleAhead === 1 ? "person" : "people"} ahead of you`}
             </Typography>
             <Typography color="text.secondary">
-              The lyrics will appear here when the host starts the music.
+              {isYourTurn
+                ? "This is your moment — give it everything."
+                : activeParticipant
+                  ? "Keep the good vibes going — you’re coming up soon."
+                  : "Your place is based on the order you joined the room."}
             </Typography>
-            <Stack direction="row" spacing={0.7} sx={{ pt: 2 }}>
-              {[0, 1, 2, 3, 4, 5, 6].map((bar) => (
+            <Box
+              sx={{
+                display: "flex",
+                gap: 0.7,
+                alignItems: "end",
+                pt: 2,
+                height: 48,
+                "@keyframes roomPulse": {
+                  "0%, 100%": { transform: "scaleY(.55)", opacity: 0.55 },
+                  "50%": { transform: "scaleY(1)", opacity: 1 },
+                },
+              }}
+            >
+              {[0, 1, 2, 3, 4, 5, 6, 7, 8].map((bar) => (
                 <Box
                   key={bar}
                   sx={{
-                    width: 4,
-                    height: 20 + ((bar * 13) % 26),
+                    width: 5,
+                    height: 22 + ((bar * 11) % 22),
                     borderRadius: 2,
                     bgcolor:
-                      bar < 3 ? "secondary.main" : "rgba(255,255,255,.16)",
+                      bar < 4 ? "secondary.main" : "rgba(255,255,255,.16)",
+                    transformOrigin: "bottom",
+                    animation: "roomPulse 1.1s ease-in-out infinite",
+                    animationDelay: `${bar * 0.08}s`,
                   }}
                 />
               ))}
-            </Stack>
+            </Box>
           </Stack>
         </Paper>
         <Stack
@@ -376,21 +417,41 @@ function ParticipantRoom({
             </Typography>
             <Typography variant="body2" color="text.secondary">
               {tab === 0
-                ? "Songs are ordered by the time they were added"
+                ? "Your place in the singing order"
                 : "Songs you added to this room"}
             </Typography>
           </Box>
           <Typography variant="caption" color="text.secondary">
-            {visibleSongs.length} songs
+            {tab === 0
+              ? `${participants.length} singers`
+              : `${visibleSongs.length} songs`}
           </Typography>
         </Stack>
-        {(songsError || personalSongsError) && (
+        {(participantsError || personalSongsError) && (
           <Alert severity="error" sx={{ mb: 2 }}>
-            Could not load songs: {songsError || personalSongsError}
+            Could not load room data: {participantsError || personalSongsError}
           </Alert>
         )}
         <List disablePadding>
-          {visibleSongs.length === 0 ? (
+          {tab === 0 ? (
+            participants.length === 0 ? (
+              <Typography
+                color="text.secondary"
+                sx={{ py: 6, textAlign: "center" }}
+              >
+                No participants have joined yet.
+              </Typography>
+            ) : (
+              participants.map((participant, index) => (
+                <ParticipantQueueItem
+                  key={participant.id}
+                  participant={participant}
+                  index={index}
+                  isSelf={participant.id === participantId}
+                />
+              ))
+            )
+          ) : visibleSongs.length === 0 ? (
             <Typography
               color="text.secondary"
               sx={{ py: 6, textAlign: "center" }}
@@ -531,24 +592,154 @@ function ParticipantRoom({
   );
 }
 
-function ParticipantSongItem({ song, index, sessionId, participantId, canDelete, onDeleted }: { song: SessionSong; index: number; sessionId: string; participantId: string; canDelete: boolean; onDeleted: () => void }) {
-  const [offset, setOffset] = useState(0)
-  const [deleting, setDeleting] = useState(false)
+function ParticipantQueueItem({
+  participant,
+  index,
+  isSelf,
+}: {
+  participant: SessionParticipant;
+  index: number;
+  isSelf: boolean;
+}) {
+  const active = participant.visibility;
+  return (
+    <ListItem
+      disableGutters
+      sx={{
+        py: 1.7,
+        opacity: active ? 1 : 0.45,
+        borderBottom: "1px solid rgba(255,255,255,.08)",
+      }}
+    >
+      <ListItemAvatar>
+        <Avatar
+          sx={{
+            bgcolor: active
+              ? ["#ec7197", "#ffca5f", "#8f7bff"][index % 3]
+              : "rgba(255,255,255,.15)",
+            color: active ? "#17101f" : "text.secondary",
+            fontWeight: 700,
+          }}
+        >
+          {index + 1}
+        </Avatar>
+      </ListItemAvatar>
+      <ListItemText
+        primary={participant.nickname}
+        secondary={active ? "In the singing order" : "Currently unavailable"}
+        primaryTypographyProps={{
+          fontWeight: 700,
+          sx: { textDecoration: active ? "none" : "line-through" },
+        }}
+        secondaryTypographyProps={{
+          color: active ? "text.secondary" : "warning.main",
+        }}
+      />
+      {isSelf && <Chip label="You" size="small" color="secondary" />}
+    </ListItem>
+  );
+}
+
+function ParticipantSongItem({
+  song,
+  index,
+  sessionId,
+  participantId,
+  canDelete,
+  onDeleted,
+}: {
+  song: SessionSong;
+  index: number;
+  sessionId: string;
+  participantId: string;
+  canDelete: boolean;
+  onDeleted: () => void;
+}) {
+  const [offset, setOffset] = useState(0);
+  const [deleting, setDeleting] = useState(false);
   const handlers = useSwipeable({
     onSwiping: ({ deltaX }) => setOffset(Math.min(0, Math.max(-90, deltaX))),
-    onSwipedLeft: () => { if (canDelete) void removeSong() },
+    onSwipedLeft: () => {
+      if (canDelete) void removeSong();
+    },
     onSwiped: () => setOffset(0),
     trackTouch: true,
     trackMouse: false,
-  })
+  });
 
   async function removeSong() {
-    if (deleting) return
-    setDeleting(true)
-    try { await deleteSong(sessionId, participantId, song.id); onDeleted() } finally { setDeleting(false); setOffset(0) }
+    if (deleting) return;
+    setDeleting(true);
+    try {
+      await deleteSong(sessionId, participantId, song.id);
+      onDeleted();
+    } finally {
+      setDeleting(false);
+      setOffset(0);
+    }
   }
 
-  return <Box {...handlers} sx={{ position: 'relative', overflow: 'hidden' }}><Box sx={{ position: 'absolute', inset: 0, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', pr: 2, bgcolor: 'rgba(236,113,151,.16)', color: 'secondary.main' }}><DeleteOutlineRoundedIcon /></Box><ListItem disableGutters sx={{ position: 'relative', transform: `translateX(${offset}px)`, transition: offset === 0 ? 'transform .2s' : 'none', py: 1.7, px: 1, bgcolor: '#0d0a12', borderBottom: '1px solid rgba(255,255,255,.08)' }}><ListItemAvatar><Avatar sx={{ bgcolor: ['#ec7197', '#ffca5f', '#8f7bff'][index % 3], color: '#17101f', fontWeight: 700 }}>{index + 1}</Avatar></ListItemAvatar><ListItemText primary={song.title} secondary={`${song.requesterName} · ${song.status}`} primaryTypographyProps={{ fontWeight: 700 }} secondaryTypographyProps={{ color: 'text.secondary', sx: { textTransform: 'capitalize' } }} />{canDelete && <IconButton onClick={() => void removeSong()} disabled={deleting} aria-label={`delete ${song.title}`} color="secondary"><DeleteOutlineRoundedIcon /></IconButton>}</ListItem></Box>
+  return (
+    <Box {...handlers} sx={{ position: "relative", overflow: "hidden" }}>
+      <Box
+        sx={{
+          position: "absolute",
+          inset: 0,
+          display: "flex",
+          justifyContent: "flex-end",
+          alignItems: "center",
+          pr: 2,
+          bgcolor: "rgba(236,113,151,.16)",
+          color: "secondary.main",
+        }}
+      >
+        <DeleteOutlineRoundedIcon />
+      </Box>
+      <ListItem
+        disableGutters
+        sx={{
+          position: "relative",
+          transform: `translateX(${offset}px)`,
+          transition: offset === 0 ? "transform .2s" : "none",
+          py: 1.7,
+          px: 1,
+          bgcolor: "#0d0a12",
+          borderBottom: "1px solid rgba(255,255,255,.08)",
+        }}
+      >
+        <ListItemAvatar>
+          <Avatar
+            sx={{
+              bgcolor: ["#ec7197", "#ffca5f", "#8f7bff"][index % 3],
+              color: "#17101f",
+              fontWeight: 700,
+            }}
+          >
+            {index + 1}
+          </Avatar>
+        </ListItemAvatar>
+        <ListItemText
+          primary={song.title}
+          secondary={`${song.requesterName} · ${song.status}`}
+          primaryTypographyProps={{ fontWeight: 700 }}
+          secondaryTypographyProps={{
+            color: "text.secondary",
+            sx: { textTransform: "capitalize" },
+          }}
+        />
+        {canDelete && (
+          <IconButton
+            onClick={() => void removeSong()}
+            disabled={deleting}
+            aria-label={`delete ${song.title}`}
+            color="secondary"
+          >
+            <DeleteOutlineRoundedIcon />
+          </IconButton>
+        )}
+      </ListItem>
+    </Box>
+  );
 }
 
 export default JoinRoomPage;

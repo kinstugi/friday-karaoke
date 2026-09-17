@@ -103,8 +103,13 @@ export async function addHostParticipant(sessionId: string, nickname: string) {
   });
 }
 
-export async function deleteParticipant(sessionId: string, participantId: string) {
-  await deleteDoc(doc(db, 'sessions', sessionId, 'participants', participantId))
+export async function deleteParticipant(
+  sessionId: string,
+  participantId: string,
+) {
+  await deleteDoc(
+    doc(db, "sessions", sessionId, "participants", participantId),
+  );
 }
 
 export function subscribeToParticipants(
@@ -148,6 +153,30 @@ export async function setParticipantVisibility(
   );
 }
 
+export async function setSessionNowSinging(
+  sessionId: string,
+  participantId: string,
+) {
+  await updateDoc(doc(db, "sessions", sessionId), {
+    activeParticipantId: participantId,
+  });
+}
+
+export function subscribeToSessionState(
+  sessionId: string,
+  onChange: (activeParticipantId: string | null) => void,
+  onError: (error: Error) => void,
+): Unsubscribe {
+  return onSnapshot(
+    doc(db, "sessions", sessionId),
+    (snapshot) =>
+      onChange(
+        (snapshot.data()?.activeParticipantId as string | undefined) ?? null,
+      ),
+    onError,
+  );
+}
+
 export async function addSong(
   sessionId: string,
   participantId: string,
@@ -183,7 +212,15 @@ export async function deleteSong(
   songId: string,
 ) {
   await deleteDoc(
-    doc(db, "sessions", sessionId, "participants", participantId, "songs", songId),
+    doc(
+      db,
+      "sessions",
+      sessionId,
+      "participants",
+      participantId,
+      "songs",
+      songId,
+    ),
   );
 }
 
