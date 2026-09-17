@@ -9,6 +9,7 @@ import {
   serverTimestamp,
   setDoc,
   updateDoc,
+  writeBatch,
   where,
   type Unsubscribe,
 } from "firebase/firestore";
@@ -110,6 +111,23 @@ export async function deleteParticipant(
   await deleteDoc(
     doc(db, "sessions", sessionId, "participants", participantId),
   );
+}
+
+export async function leaveSession(sessionId: string, participantId: string) {
+  const songs = await getDocs(
+    collection(
+      db,
+      "sessions",
+      sessionId,
+      "participants",
+      participantId,
+      "songs",
+    ),
+  );
+  const batch = writeBatch(db);
+  songs.docs.forEach((song) => batch.delete(song.ref));
+  batch.delete(doc(db, "sessions", sessionId, "participants", participantId));
+  await batch.commit();
 }
 
 export function subscribeToParticipants(

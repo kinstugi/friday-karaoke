@@ -42,6 +42,7 @@ import {
   deleteSong,
   findSessionByCode,
   joinSession,
+  leaveSession,
   setParticipantVisibility,
   type SessionParticipant,
   type SessionSong,
@@ -98,6 +99,7 @@ function JoinRoomPage({ code, onBack }: { code: string; onBack: () => void }) {
         nickname={nickname}
         sessionId={sessionId}
         participantId={participantId}
+        onLeave={onBack}
       />
     );
   return (
@@ -198,12 +200,14 @@ function ParticipantRoom({
   nickname,
   sessionId,
   participantId,
+  onLeave,
 }: {
   title: string;
   code: string;
   nickname: string;
   sessionId: string;
   participantId: string;
+  onLeave: () => void;
 }) {
   const { participants, error: participantsError } =
     useSessionParticipants(sessionId);
@@ -212,6 +216,7 @@ function ParticipantRoom({
     useParticipantSongs(sessionId, participantId);
   const [available, setAvailable] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [leaveError, setLeaveError] = useState("");
   const [tab, setTab] = useState(0);
   const [addOpen, setAddOpen] = useState(false);
   const [songTitle, setSongTitle] = useState("");
@@ -241,6 +246,28 @@ function ParticipantRoom({
     try {
       await setParticipantVisibility(sessionId, participantId, nextValue);
       setAvailable(nextValue);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function leaveRoom() {
+    if (!participantId || saving) return;
+    const confirmed = window.confirm(
+      "Leave this room? Your songs will be removed too.",
+    );
+    if (!confirmed) return;
+    setSaving(true);
+    setLeaveError("");
+    try {
+      await leaveSession(sessionId, participantId);
+      onLeave();
+    } catch (error) {
+      setLeaveError(
+        error instanceof Error
+          ? `Could not leave the room: ${error.message}`
+          : "Could not leave the room. Please try again.",
+      );
     } finally {
       setSaving(false);
     }
@@ -319,7 +346,15 @@ function ParticipantRoom({
                 variant="outlined"
                 color={available ? "success" : "warning"}
               >
-                {available ? "Available" : "On break"}
+                {available ? "Skip me" : "Restore me"}
+              </Button>
+              <Button
+                onClick={() => void leaveRoom()}
+                disabled={saving}
+                size="small"
+                color="inherit"
+              >
+                Leave
               </Button>
               <Avatar
                 sx={{
@@ -336,6 +371,11 @@ function ParticipantRoom({
         </Container>
       </Box>
       <Container maxWidth="lg" sx={{ pt: 3 }}>
+        {leaveError && (
+          <Alert severity="error" sx={{ mb: 2 }}>
+            {leaveError}
+          </Alert>
+        )}
         <Paper
           elevation={0}
           sx={{
@@ -448,6 +488,7 @@ function ParticipantRoom({
                   participant={participant}
                   index={index}
                   isSelf={participant.id === participantId}
+                  isCurrent={participant.id === activeParticipantId}
                 />
               ))
             )
@@ -596,10 +637,12 @@ function ParticipantQueueItem({
   participant,
   index,
   isSelf,
+  isCurrent,
 }: {
   participant: SessionParticipant;
   index: number;
   isSelf: boolean;
+  isCurrent: boolean;
 }) {
   const active = participant.visibility;
   return (
@@ -608,6 +651,9 @@ function ParticipantQueueItem({
       sx={{
         py: 1.7,
         opacity: active ? 1 : 0.45,
+        bgcolor: isCurrent ? "rgba(255,202,95,.14)" : "transparent",
+        borderLeft: "3px solid",
+        borderLeftColor: isCurrent ? "primary.main" : "transparent",
         borderBottom: "1px solid rgba(255,255,255,.08)",
       }}
     >
@@ -626,13 +672,23 @@ function ParticipantQueueItem({
       </ListItemAvatar>
       <ListItemText
         primary={participant.nickname}
-        secondary={active ? "In the singing order" : "Currently unavailable"}
+        secondary={
+          isCurrent
+            ? "Now singing"
+            : active
+              ? "In the singing order"
+              : "Currently unavailable"
+        }
         primaryTypographyProps={{
           fontWeight: 700,
           sx: { textDecoration: active ? "none" : "line-through" },
         }}
         secondaryTypographyProps={{
-          color: active ? "text.secondary" : "warning.main",
+          color: isCurrent
+            ? "primary.main"
+            : active
+              ? "text.secondary"
+              : "warning.main",
         }}
       />
       {isSelf && <Chip label="You" size="small" color="secondary" />}

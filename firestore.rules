@@ -23,7 +23,8 @@ service cloud.firestore {
           && request.resource.data.visibility is bool;
 
         allow delete: if request.auth != null
-          && get(/databases/$(database)/documents/sessions/$(sessionId)).data.hostId == request.auth.uid;
+          && (request.auth.uid == participantId
+            || get(/databases/$(database)/documents/sessions/$(sessionId)).data.hostId == request.auth.uid);
 
         match /songs/{songId} {
           allow read: if request.auth != null
