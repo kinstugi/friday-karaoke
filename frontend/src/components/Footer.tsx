@@ -1,3 +1,30 @@
-import { Box, Container, Link, Stack, Typography } from '@mui/material'
-function Footer() { return <Box component="footer" sx={{ py: 4, borderTop: '1px solid rgba(255,255,255,.1)' }}><Container maxWidth="lg"><Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} justifyContent="space-between"><Typography variant="body2" color="text.secondary">© 2026 Singalong</Typography><Stack direction="row" spacing={3}><Link href="#features" color="text.secondary" underline="hover">Features</Link><Link href="#how-it-works" color="text.secondary" underline="hover">How it works</Link></Stack></Stack></Container></Box> }
-export default Footer
+import { Box, Container, Link, Stack, Typography } from "@mui/material";
+function Footer() {
+  return (
+    <Box
+      component="footer"
+      sx={{ py: 4, borderTop: "1px solid rgba(255,255,255,.1)" }}
+    >
+      <Container maxWidth="lg">
+        <Stack
+          direction={{ xs: "column", sm: "row" }}
+          spacing={2}
+          justifyContent="space-between"
+        >
+          <Typography variant="body2" color="text.secondary">
+            © 2026 Singalong
+          </Typography>
+          <Stack direction="row" spacing={3}>
+            <Link href="#features" color="text.secondary" underline="hover">
+              Features
+            </Link>
+            <Link href="#how-it-works" color="text.secondary" underline="hover">
+              How it works
+            </Link>
+          </Stack>
+        </Stack>
+      </Container>
+    </Box>
+  );
+}
+export default Footer;
