@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Avatar,
   Box,
@@ -28,9 +28,12 @@ import StopCircleRoundedIcon from "@mui/icons-material/StopCircleRounded";
 import { useSessionParticipants } from "../hooks/useSessionParticipants";
 import {
   deleteParticipant,
+  markSongPlayed,
   setParticipantVisibility,
   setSessionNowSinging,
+  subscribeToParticipantSongs,
   type SessionParticipant,
+  type SessionSong,
 } from "../lib/sessions";
 import ParticipantList, { moveItem } from "../components/room/ParticipantList";
 import RoomActionCard from "../components/room/RoomActionCard";
@@ -61,6 +64,11 @@ function RoomPage({
   const [currentParticipantId, setCurrentParticipantId] = useState<
     string | null
   >(null);
+  const currentSongRef = useRef<{
+    participantId: string;
+    songId: string;
+  } | null>(null);
+  const songsByParticipantRef = useRef<Record<string, SessionSong[]>>({});
   const inviteUrl = `${window.location.origin}/join/${code}`;
   const openPanel = (nextPanel: Panel) =>
     setPanel(panel === nextPanel ? null : nextPanel);
@@ -76,19 +84,50 @@ function RoomPage({
     ]);
   }, [participants]);
 
+  const participantIds = participants.map((participant) => participant.id);
+
+  useEffect(() => {
+    const unsubscribers = participantIds.map((participantId) =>
+      subscribeToParticipantSongs(
+        sessionId,
+        participantId,
+        (songs) => {
+          songsByParticipantRef.current[participantId] = songs;
+        },
+        (error) => {
+          console.error("Firestore song listener failed:", error);
+        },
+      ),
+    );
+    return () => {
+      unsubscribers.forEach((unsubscribe) => unsubscribe());
+    };
+  }, [sessionId, participantIds.join(",")]);
+
   const orderedParticipants = orderedIds
     .map((id) => participants.find((participant) => participant.id === id))
     .filter((participant): participant is SessionParticipant =>
       Boolean(participant),
     );
+  function activateParticipant(participantId: string) {
+    const song = (songsByParticipantRef.current[participantId] ?? []).find(
+      (playlistSong) => !playlistSong.played && playlistSong.youtubeUrl,
+    );
+    setCurrentParticipantId(participantId);
+    void setSessionNowSinging(sessionId, participantId);
+    if (song?.youtubeUrl) {
+      currentSongRef.current = { participantId, songId: song.id };
+      window.open(song.youtubeUrl, "_blank", "noopener,noreferrer");
+    } else {
+      currentSongRef.current = null;
+    }
+  }
+
   const startSession = () => {
     const firstAvailable = orderedParticipants.find(
       (participant) => participant.visibility,
     );
-    if (firstAvailable) {
-      setCurrentParticipantId(firstAvailable.id);
-      void setSessionNowSinging(sessionId, firstAvailable.id);
-    }
+    if (firstAvailable) activateParticipant(firstAvailable.id);
   };
   const nextParticipant = () => {
     const availableParticipants = orderedParticipants.filter(
@@ -100,8 +139,14 @@ function RoomPage({
     );
     const nextIndex =
       currentIndex < 0 ? 0 : (currentIndex + 1) % availableParticipants.length;
-    setCurrentParticipantId(availableParticipants[nextIndex].id);
-    void setSessionNowSinging(sessionId, availableParticipants[nextIndex].id);
+    const previousSong = currentSongRef.current;
+    activateParticipant(availableParticipants[nextIndex].id);
+    if (!previousSong) return;
+    void markSongPlayed(
+      sessionId,
+      previousSong.participantId,
+      previousSong.songId,
+    );
   };
 
   return (

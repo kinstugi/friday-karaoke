@@ -39,6 +39,9 @@ service cloud.firestore {
             && request.resource.data.title.size() <= 100
             && request.resource.data.youtubeUrl is string
             && request.resource.data.youtubeUrl.size() <= 500;
+          allow update: if request.auth != null
+            && get(/databases/$(database)/documents/sessions/$(sessionId)).data.hostId == request.auth.uid
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['played', 'status']);
           allow delete: if request.auth != null
             && request.auth.uid == participantId;
         }

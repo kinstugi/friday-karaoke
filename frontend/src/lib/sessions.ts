@@ -224,6 +224,58 @@ export async function addSong(
   );
 }
 
+export async function getNextUnplayedSong(
+  sessionId: string,
+  participantId: string,
+) {
+  const snapshot = await getDocs(
+    collection(
+      db,
+      "sessions",
+      sessionId,
+      "participants",
+      participantId,
+      "songs",
+    ),
+  );
+  const songs = snapshot.docs
+    .map((songDoc) => {
+      const data = songDoc.data();
+      return {
+        id: songDoc.id,
+        youtubeUrl: data.youtubeUrl as string,
+        played: data.played === true,
+        createdAt: data.createdAt?.toDate?.() ?? null,
+      };
+    })
+    .sort(
+      (a, b) => (a.createdAt?.getTime() ?? 0) - (b.createdAt?.getTime() ?? 0),
+    );
+  return songs.find((song) => !song.played) ?? null;
+}
+
+export async function markSongPlayed(
+  sessionId: string,
+  participantId: string,
+  songId: string,
+) {
+  await updateDoc(
+    doc(
+      db,
+      "sessions",
+      sessionId,
+      "participants",
+      participantId,
+      "songs",
+      songId,
+    ),
+    {
+      played: true,
+      status: "done",
+    },
+  );
+}
+
 export async function deleteSong(
   sessionId: string,
   participantId: string,
