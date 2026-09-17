@@ -22,6 +22,9 @@ service cloud.firestore {
           && request.resource.data.nickname.size() <= 24
           && request.resource.data.visibility is bool;
 
+        allow delete: if request.auth != null
+          && get(/databases/$(database)/documents/sessions/$(sessionId)).data.hostId == request.auth.uid;
+
         match /songs/{songId} {
           allow read: if request.auth != null
             && (request.auth.uid == participantId
@@ -35,6 +38,8 @@ service cloud.firestore {
             && request.resource.data.title.size() <= 100
             && request.resource.data.youtubeUrl is string
             && request.resource.data.youtubeUrl.size() <= 500;
+          allow delete: if request.auth != null
+            && request.auth.uid == participantId;
         }
       }
 

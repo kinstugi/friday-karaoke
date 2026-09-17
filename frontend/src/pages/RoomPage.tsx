@@ -1,41 +1,46 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
-  Alert,
   Avatar,
   Box,
   Button,
   Chip,
+  Container,
   Divider,
   Drawer,
+  Fab,
+  Grid,
   IconButton,
   Paper,
-  Snackbar,
   Stack,
-  TextField,
   Tooltip,
   Typography,
 } from "@mui/material";
+import AddRoundedIcon from "@mui/icons-material/AddRounded";
 import CloseRoundedIcon from "@mui/icons-material/CloseRounded";
-import ContentCopyRoundedIcon from "@mui/icons-material/ContentCopyRounded";
 import ExpandRoundedIcon from "@mui/icons-material/ExpandRounded";
 import GraphicEqRoundedIcon from "@mui/icons-material/GraphicEqRounded";
 import GroupRoundedIcon from "@mui/icons-material/GroupRounded";
 import LogoutRoundedIcon from "@mui/icons-material/LogoutRounded";
 import QueueMusicRoundedIcon from "@mui/icons-material/QueueMusicRounded";
 import ShareRoundedIcon from "@mui/icons-material/ShareRounded";
+import SkipNextRoundedIcon from "@mui/icons-material/SkipNextRounded";
 import StopCircleRoundedIcon from "@mui/icons-material/StopCircleRounded";
-import CheckRoundedIcon from "@mui/icons-material/CheckRounded";
-import { QRCodeSVG } from "qrcode.react";
 import { useSessionParticipants } from "../hooks/useSessionParticipants";
 import { useSessionSongs } from "../hooks/useSessionSongs";
 import {
-  addHostParticipant,
+  deleteParticipant,
   getQueueSongs,
   setParticipantVisibility,
   type SessionParticipant,
   type SessionSong,
 } from "../lib/sessions";
-import { copyText } from "../lib/clipboard";
+import ParticipantList, { moveItem } from "../components/room/ParticipantList";
+import RoomActionCard from "../components/room/RoomActionCard";
+import {
+  GuestsPanel,
+  QueuePanel,
+  SharePanel,
+} from "../components/room/RoomPanels";
 
 type Panel = "queue" | "guests" | "share" | null;
 
@@ -52,12 +57,51 @@ function RoomPage({
 }) {
   const { participants } = useSessionParticipants(sessionId);
   const { songs } = useSessionSongs(sessionId);
+  const [orderedIds, setOrderedIds] = useState<string[]>([]);
   const [panel, setPanel] = useState<Panel>(null);
   const [expanded, setExpanded] = useState(false);
   const [endOpen, setEndOpen] = useState(false);
+  const [currentParticipantId, setCurrentParticipantId] = useState<
+    string | null
+  >(null);
   const inviteUrl = `${window.location.origin}/join/${code}`;
   const openPanel = (nextPanel: Panel) =>
     setPanel(panel === nextPanel ? null : nextPanel);
+
+  useEffect(() => {
+    setOrderedIds((currentIds) => [
+      ...currentIds.filter((id) =>
+        participants.some((participant) => participant.id === id),
+      ),
+      ...participants
+        .filter((participant) => !currentIds.includes(participant.id))
+        .map((participant) => participant.id),
+    ]);
+  }, [participants]);
+
+  const orderedParticipants = orderedIds
+    .map((id) => participants.find((participant) => participant.id === id))
+    .filter((participant): participant is SessionParticipant =>
+      Boolean(participant),
+    );
+  const startSession = () => {
+    const firstAvailable = orderedParticipants.find(
+      (participant) => participant.visibility,
+    );
+    if (firstAvailable) setCurrentParticipantId(firstAvailable.id);
+  };
+  const nextParticipant = () => {
+    const availableParticipants = orderedParticipants.filter(
+      (participant) => participant.visibility,
+    );
+    if (!availableParticipants.length) return;
+    const currentIndex = availableParticipants.findIndex(
+      (participant) => participant.id === currentParticipantId,
+    );
+    const nextIndex =
+      currentIndex < 0 ? 0 : (currentIndex + 1) % availableParticipants.length;
+    setCurrentParticipantId(availableParticipants[nextIndex].id);
+  };
 
   return (
     <Box
@@ -84,7 +128,11 @@ function RoomPage({
           <GraphicEqRoundedIcon sx={{ color: "primary.main" }} />
           <Box>
             <Typography fontWeight={700}>{title}</Typography>
-            <Stack direction="row" spacing={1} alignItems="center">
+            <Stack
+              direction={{ xs: "column", sm: "row" }}
+              spacing={1}
+              alignItems={{ xs: "flex-start", sm: "center" }}
+            >
               <Box
                 sx={{
                   width: 6,
@@ -138,56 +186,184 @@ function RoomPage({
         component="main"
         sx={{
           flex: 1,
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center",
-          textAlign: "center",
-          p: 3,
+          p: { xs: 2, md: 6 },
           background:
-            "radial-gradient(circle at 50% 40%, #281933 0, transparent 42%)",
+            "radial-gradient(circle at 50% 15%, #281933 0, transparent 42%)",
         }}
       >
-        <Stack alignItems="center" spacing={3} sx={{ maxWidth: 700 }}>
-          <Chip
-            label="UP NEXT"
-            sx={{
-              color: "secondary.main",
-              bgcolor: "rgba(236,113,151,.12)",
-              letterSpacing: ".12em",
-            }}
-          />
-          <Typography
-            variant="h1"
-            sx={{
-              fontSize: { xs: "2.7rem", md: "5rem" },
-              letterSpacing: "-.06em",
-            }}
+        <Stack spacing={3} sx={{ maxWidth: 900, mx: "auto" }}>
+          <Stack
+            direction={{ xs: "column", sm: "row" }}
+            justifyContent="space-between"
+            alignItems={{ xs: "flex-start", sm: "flex-end" }}
+            spacing={2}
           >
-            The stage is
-            <br />
-            <Box component="span" sx={{ color: "primary.main" }}>
-              yours.
+            <Box>
+              <Typography
+                variant="overline"
+                color="primary.main"
+                letterSpacing=".15em"
+              >
+                HOST CONTROL ROOM
+              </Typography>
+              <Typography
+                variant="h2"
+                sx={{
+                  mt: 1,
+                  fontSize: { xs: "2.35rem", md: "3.7rem" },
+                  letterSpacing: "-.06em",
+                }}
+              >
+                Singing order
+              </Typography>
+              <Typography color="text.secondary" sx={{ mt: 1 }}>
+                Drag guests into the order you want them to sing.
+              </Typography>
             </Box>
-          </Typography>
-          <Typography variant="h6" color="text.secondary" fontWeight={400}>
-            Lyrics will appear here when the first song starts.
-          </Typography>
-          <Paper
-            elevation={0}
-            sx={{
-              px: 3,
-              py: 1.5,
-              bgcolor: "rgba(255,255,255,.06)",
-              color: "text.secondary",
-              border: "1px solid rgba(255,255,255,.1)",
-            }}
-          >
-            <Typography variant="body2">
-              Add a song to get the room moving
-            </Typography>
-          </Paper>
+            <Stack direction="row" spacing={1} alignItems="center">
+              <Chip
+                icon={<GroupRoundedIcon />}
+                label={`${orderedParticipants.length} joined`}
+                sx={{ color: "white", bgcolor: "rgba(255,255,255,.08)" }}
+              />
+              <Button
+                onClick={startSession}
+                disabled={orderedParticipants.length === 0}
+                variant={currentParticipantId ? "outlined" : "contained"}
+                color="primary"
+              >
+                {currentParticipantId ? "Session started" : "Start session"}
+              </Button>
+              <Button
+                onClick={nextParticipant}
+                disabled={
+                  !currentParticipantId ||
+                  !orderedParticipants.some(
+                    (participant) => participant.visibility,
+                  )
+                }
+                variant="contained"
+                color="secondary"
+                endIcon={<SkipNextRoundedIcon />}
+              >
+                Next singer
+              </Button>
+            </Stack>
+          </Stack>
+          {orderedParticipants.length === 0 ? (
+            <Paper
+              elevation={0}
+              sx={{
+                p: 7,
+                textAlign: "center",
+                bgcolor: "rgba(255,255,255,.04)",
+                border: "1px dashed rgba(255,255,255,.18)",
+              }}
+            >
+              <GroupRoundedIcon
+                sx={{ fontSize: 44, color: "text.secondary" }}
+              />
+              <Typography variant="h6" sx={{ mt: 2 }}>
+                Waiting for your first guest
+              </Typography>
+              <Typography color="text.secondary" sx={{ mt: 1 }}>
+                Share the room link to get your singers in here.
+              </Typography>
+            </Paper>
+          ) : (
+            <Paper
+              elevation={0}
+              sx={{
+                bgcolor: "rgba(255,255,255,.045)",
+                border: "1px solid rgba(255,255,255,.1)",
+                borderRadius: 3,
+                overflow: "hidden",
+              }}
+            >
+              <Stack
+                direction="row"
+                sx={{
+                  px: 2,
+                  py: 1.5,
+                  borderBottom: "1px solid rgba(255,255,255,.1)",
+                }}
+              >
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ ml: 5 }}
+                >
+                  PARTICIPANT
+                </Typography>
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ ml: "auto", mr: 2 }}
+                >
+                  STATUS
+                </Typography>
+              </Stack>
+              <ParticipantList
+                participants={orderedParticipants}
+                currentParticipantId={currentParticipantId}
+                onMove={(index, direction) =>
+                  setOrderedIds((ids) => moveItem(ids, index, direction))
+                }
+                onToggle={(participant) =>
+                  setParticipantVisibility(
+                    sessionId,
+                    participant.id,
+                    !participant.visibility,
+                  )
+                }
+                onDelete={(participant) =>
+                  deleteParticipant(sessionId, participant.id)
+                }
+              />
+            </Paper>
+          )}
+          <Grid container spacing={2}>
+            <Grid size={{ xs: 12, sm: 4 }}>
+              <RoomActionCard
+                icon={<QueueMusicRoundedIcon />}
+                title="Manage queue"
+                subtitle={`${getQueueSongs(songs).length} active songs`}
+                onClick={() => openPanel("queue")}
+              />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 4 }}>
+              <RoomActionCard
+                icon={<ShareRoundedIcon />}
+                title="Invite guests"
+                subtitle="Share room link & QR"
+                onClick={() => openPanel("share")}
+              />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 4 }}>
+              <RoomActionCard
+                icon={<StopCircleRoundedIcon />}
+                title="End session"
+                subtitle="Close this room"
+                danger
+                onClick={() => setEndOpen(true)}
+              />
+            </Grid>
+          </Grid>
         </Stack>
       </Box>
+      <Fab
+        color="secondary"
+        aria-label="add guest"
+        onClick={() => openPanel("guests")}
+        sx={{
+          position: "fixed",
+          right: { xs: 20, md: 36 },
+          bottom: 86,
+          zIndex: 2,
+        }}
+      >
+        <AddRoundedIcon />
+      </Fab>
       <Box
         component="footer"
         sx={{
@@ -200,7 +376,7 @@ function RoomPage({
         }}
       >
         <Typography variant="caption" color="text.secondary">
-          Host controls · Lyrics mode
+          Host controls · Guest management
         </Typography>
         <Stack direction="row" spacing={1}>
           <Avatar
@@ -299,278 +475,6 @@ function RoomPage({
         </Drawer>
       )}
     </Box>
-  );
-}
-
-function QueuePanel({ songs }: { songs: SessionSong[] }) {
-  const queueSongs = getQueueSongs(songs);
-  return (
-    <Stack spacing={2}>
-      {queueSongs.length === 0 ? (
-        <Typography color="text.secondary">
-          No songs have been added yet.
-        </Typography>
-      ) : (
-        queueSongs.map((song, index) => (
-          <Stack
-            key={song.id}
-            direction="row"
-            spacing={1.5}
-            alignItems="center"
-            sx={{ py: 1.3, borderBottom: "1px solid rgba(255,255,255,.08)" }}
-          >
-            <Typography variant="caption" color="text.disabled">
-              #{index + 1}
-            </Typography>
-            <Box sx={{ minWidth: 0, flex: 1 }}>
-              <Typography noWrap fontWeight={700}>
-                {song.title}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                {song.requesterName}
-              </Typography>
-            </Box>
-          </Stack>
-        ))
-      )}
-      <Button variant="contained" startIcon={<QueueMusicRoundedIcon />}>
-        Add the first song
-      </Button>
-      <Box
-        sx={{ mt: 2, p: 2, bgcolor: "rgba(255,255,255,.05)", borderRadius: 2 }}
-      >
-        <Typography variant="body2" fontWeight={700}>
-          Tip
-        </Typography>
-        <Typography variant="caption" color="text.secondary">
-          Guests can add songs from their phones using the room link.
-        </Typography>
-      </Box>
-    </Stack>
-  );
-}
-function GuestsPanel({
-  participants,
-  sessionId,
-}: {
-  participants: SessionParticipant[];
-  sessionId: string;
-}) {
-  const [nickname, setNickname] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-  const [feedback, setFeedback] = useState("");
-
-  async function addGuest() {
-    if (!nickname.trim()) return;
-    setSaving(true);
-    setError("");
-    try {
-      await addHostParticipant(sessionId, nickname);
-      setNickname("");
-    } catch {
-      setError("Could not add this guest.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function toggleSkip(participant: SessionParticipant) {
-    setError("");
-    const nextVisibility = participant.visibility === false;
-    try {
-      await setParticipantVisibility(sessionId, participant.id, nextVisibility);
-      setFeedback(
-        nextVisibility
-          ? `${participant.nickname} was restored.`
-          : `${participant.nickname} was skipped.`,
-      );
-    } catch (skipError) {
-      console.error("Could not update participant visibility:", skipError);
-      setError(
-        skipError instanceof Error
-          ? skipError.message
-          : "Could not update this guest.",
-      );
-    }
-  }
-
-  return (
-    <Stack spacing={2}>
-      <Stack direction="row" spacing={2} alignItems="center">
-        <Avatar sx={{ bgcolor: "secondary.main" }}>H</Avatar>
-        <Box>
-          <Typography fontWeight={700}>Host</Typography>
-          <Typography variant="caption" color="text.secondary">
-            Running the room
-          </Typography>
-        </Box>
-        <Chip label="You" size="small" sx={{ ml: "auto" }} />
-      </Stack>
-      {participants.length === 0 ? (
-        <Typography color="text.secondary" sx={{ mt: 2 }}>
-          Waiting for guests to join…
-        </Typography>
-      ) : (
-        <Stack spacing={1}>
-          {participants.map((participant, index) => (
-            <Stack
-              key={participant.id}
-              direction="row"
-              spacing={1.2}
-              alignItems="center"
-              sx={{
-                py: 1,
-                px: 1,
-                borderRadius: 2,
-                opacity: participant.visibility ? 1 : 0.5,
-                bgcolor: participant.visibility
-                  ? "transparent"
-                  : "rgba(255,255,255,.05)",
-              }}
-            >
-              <Typography
-                variant="caption"
-                color="text.disabled"
-                sx={{ width: 18 }}
-              >
-                #{index + 1}
-              </Typography>
-              <Avatar
-                sx={{
-                  width: 34,
-                  height: 34,
-                  bgcolor:
-                    participant.visibility === false
-                      ? "rgba(255,255,255,.15)"
-                      : "primary.main",
-                  color:
-                    participant.visibility === false
-                      ? "text.secondary"
-                      : "#17101f",
-                  fontSize: 14,
-                }}
-              >
-                {participant.nickname[0]?.toUpperCase()}
-              </Avatar>
-              <Box sx={{ minWidth: 0, flex: 1 }}>
-                <Typography
-                  sx={{
-                    textDecoration:
-                      participant.visibility === false
-                        ? "line-through"
-                        : "none",
-                  }}
-                >
-                  {participant.nickname}
-                </Typography>
-                <Typography
-                  variant="caption"
-                  color={
-                    participant.visibility === false
-                      ? "warning.main"
-                      : "text.secondary"
-                  }
-                >
-                  {participant.visibility === false
-                    ? "Skipped / unavailable"
-                    : participant.addedByHost
-                      ? "Added by host"
-                      : "In the singing order"}
-                </Typography>
-              </Box>
-              <Button
-                onClick={() => void toggleSkip(participant)}
-                size="small"
-                color={participant.visibility === false ? "success" : "warning"}
-              >
-                {participant.visibility === false ? "Restore" : "Skip"}
-              </Button>
-            </Stack>
-          ))}
-        </Stack>
-      )}
-      <Divider sx={{ borderColor: "rgba(255,255,255,.1)" }} />
-      <Typography variant="subtitle2">Add someone without a phone</Typography>
-      <Stack direction="row" spacing={1}>
-        <TextField
-          size="small"
-          fullWidth
-          placeholder="Guest nickname"
-          value={nickname}
-          onChange={(event) => setNickname(event.target.value)}
-        />
-        <Button
-          onClick={() => void addGuest()}
-          variant="contained"
-          disabled={saving || !nickname.trim()}
-        >
-          Add
-        </Button>
-      </Stack>
-      {error && (
-        <Typography variant="caption" color="error">
-          {error}
-        </Typography>
-      )}
-      <Snackbar
-        open={Boolean(feedback)}
-        autoHideDuration={2200}
-        onClose={() => setFeedback("")}
-      >
-        <Alert
-          onClose={() => setFeedback("")}
-          severity="success"
-          variant="filled"
-        >
-          {feedback}
-        </Alert>
-      </Snackbar>
-    </Stack>
-  );
-}
-
-function SharePanel({ code, inviteUrl }: { code: string; inviteUrl: string }) {
-  const [copied, setCopied] = useState(false);
-  async function copyInvite() {
-    try {
-      await copyText(inviteUrl);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2200);
-    } catch {
-      setCopied(false);
-    }
-  }
-  return (
-    <Stack spacing={3} alignItems="center" textAlign="center">
-      <Typography color="text.secondary">
-        Scan the code or send this link to your guests.
-      </Typography>
-      <Box sx={{ p: 2, bgcolor: "white", borderRadius: 2 }}>
-        <QRCodeSVG value={inviteUrl} size={190} />
-      </Box>
-      <Typography variant="h5" fontWeight={700} letterSpacing=".12em">
-        {code}
-      </Typography>
-      <Box sx={{ width: "100%" }}>
-        <Typography
-          variant="caption"
-          color="text.secondary"
-          sx={{ display: "block", mb: 1, wordBreak: "break-all" }}
-        >
-          {inviteUrl}
-        </Typography>
-        <Button
-          onClick={() => void copyInvite()}
-          fullWidth
-          variant="outlined"
-          color={copied ? "success" : "inherit"}
-          startIcon={copied ? <CheckRoundedIcon /> : <ContentCopyRoundedIcon />}
-        >
-          {copied ? "Copied to clipboard" : "Copy invite link"}
-        </Button>
-      </Box>
-    </Stack>
   );
 }
 

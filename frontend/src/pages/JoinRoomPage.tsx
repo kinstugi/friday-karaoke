@@ -33,13 +33,17 @@ import LibraryMusicRoundedIcon from "@mui/icons-material/LibraryMusicRounded";
 import QueueMusicRoundedIcon from "@mui/icons-material/QueueMusicRounded";
 import SearchRoundedIcon from "@mui/icons-material/SearchRounded";
 import SendRoundedIcon from "@mui/icons-material/SendRounded";
+import DeleteOutlineRoundedIcon from "@mui/icons-material/DeleteOutlineRounded";
+import { useSwipeable } from "react-swipeable";
 import { useAuth } from "../context/AuthContext";
 import {
   addSong,
+  deleteSong,
   findSessionByCode,
   getQueueSongs,
   joinSession,
   setParticipantVisibility,
+  type SessionSong,
 } from "../lib/sessions";
 import { useSessionSongs } from "../hooks/useSessionSongs";
 import { useParticipantSongs } from "../hooks/useParticipantSongs";
@@ -210,6 +214,7 @@ function ParticipantRoom({
   const [songUrl, setSongUrl] = useState("");
   const [songError, setSongError] = useState("");
   const [titleLoading, setTitleLoading] = useState(false);
+  const [titleFetchFailed, setTitleFetchFailed] = useState(false);
   const [added, setAdded] = useState(false);
   const visibleSongs = tab === 0 ? getQueueSongs(queueSongs) : personalSongs;
 
@@ -227,15 +232,17 @@ function ParticipantRoom({
   async function fetchSongTitle() {
     if (!songUrl.trim() || titleLoading) return;
     setTitleLoading(true);
+    setTitleFetchFailed(false);
     try {
       const response = await fetch(
         `https://www.youtube.com/oembed?url=${encodeURIComponent(songUrl.trim())}&format=json`,
       );
       if (!response.ok) throw new Error("Could not find video");
       const data = (await response.json()) as { title?: string };
-      if (data.title) setSongTitle(data.title);
+      if (!data.title) throw new Error("Video title was not returned");
+      setSongTitle(data.title);
     } catch {
-      // The title remains editable if YouTube oEmbed is unavailable.
+      setTitleFetchFailed(true);
     } finally {
       setTitleLoading(false);
     }
@@ -249,6 +256,7 @@ function ParticipantRoom({
       await addSong(sessionId, participantId, nickname, songTitle, songUrl);
       setSongTitle("");
       setSongUrl("");
+      setTitleFetchFailed(false);
       setAddOpen(false);
       setAdded(true);
       window.setTimeout(() => setAdded(false), 2200);
@@ -391,35 +399,15 @@ function ParticipantRoom({
             </Typography>
           ) : (
             visibleSongs.map((song, index) => (
-              <ListItem
+              <ParticipantSongItem
                 key={song.id}
-                disableGutters
-                sx={{
-                  py: 1.7,
-                  borderBottom: "1px solid rgba(255,255,255,.08)",
-                }}
-              >
-                <ListItemAvatar>
-                  <Avatar
-                    sx={{
-                      bgcolor: ["#ec7197", "#ffca5f", "#8f7bff"][index % 3],
-                      color: "#17101f",
-                      fontWeight: 700,
-                    }}
-                  >
-                    {index + 1}
-                  </Avatar>
-                </ListItemAvatar>
-                <ListItemText
-                  primary={song.title}
-                  secondary={`${song.requesterName} · ${song.status}`}
-                  primaryTypographyProps={{ fontWeight: 700 }}
-                  secondaryTypographyProps={{
-                    color: "text.secondary",
-                    sx: { textTransform: "capitalize" },
-                  }}
-                />
-              </ListItem>
+                song={song}
+                index={index}
+                sessionId={sessionId}
+                participantId={participantId}
+                canDelete={tab === 1}
+                onDeleted={() => setAdded(false)}
+              />
             ))
           )}
         </List>
@@ -486,27 +474,29 @@ function ParticipantRoom({
             </Alert>
           )}
           <Stack spacing={2}>
-            <TextField
-              autoFocus
-              fullWidth
-              required
-              label="Song title"
-              placeholder="Paste a link to fetch the title"
-              value={songTitle}
-              onChange={(event) => setSongTitle(event.target.value)}
-              helperText={
-                titleLoading
-                  ? "Fetching title from YouTube…"
-                  : "We’ll fill this from YouTube, and you can edit it."
-              }
-            />
+            {titleFetchFailed && (
+              <TextField
+                autoFocus
+                fullWidth
+                required
+                label="Song title"
+                placeholder="Enter the song title manually"
+                value={songTitle}
+                onChange={(event) => setSongTitle(event.target.value)}
+                helperText="We could not fetch the title. Add it manually."
+              />
+            )}
             <TextField
               fullWidth
               required
               label="YouTube URL"
               placeholder="https://youtube.com/watch?v=..."
               value={songUrl}
-              onChange={(event) => setSongUrl(event.target.value)}
+              onChange={(event) => {
+                setSongUrl(event.target.value);
+                setSongTitle("");
+                setTitleFetchFailed(false);
+              }}
               onBlur={() => void fetchSongTitle()}
               InputProps={{
                 startAdornment: (
@@ -514,6 +504,11 @@ function ParticipantRoom({
                     <SearchRoundedIcon />
                   </InputAdornment>
                 ),
+                endAdornment: titleLoading ? (
+                  <InputAdornment position="end">
+                    <CircularProgress size={18} />
+                  </InputAdornment>
+                ) : undefined,
               }}
             />
           </Stack>
@@ -534,6 +529,26 @@ function ParticipantRoom({
       </Dialog>
     </Box>
   );
+}
+
+function ParticipantSongItem({ song, index, sessionId, participantId, canDelete, onDeleted }: { song: SessionSong; index: number; sessionId: string; participantId: string; canDelete: boolean; onDeleted: () => void }) {
+  const [offset, setOffset] = useState(0)
+  const [deleting, setDeleting] = useState(false)
+  const handlers = useSwipeable({
+    onSwiping: ({ deltaX }) => setOffset(Math.min(0, Math.max(-90, deltaX))),
+    onSwipedLeft: () => { if (canDelete) void removeSong() },
+    onSwiped: () => setOffset(0),
+    trackTouch: true,
+    trackMouse: false,
+  })
+
+  async function removeSong() {
+    if (deleting) return
+    setDeleting(true)
+    try { await deleteSong(sessionId, participantId, song.id); onDeleted() } finally { setDeleting(false); setOffset(0) }
+  }
+
+  return <Box {...handlers} sx={{ position: 'relative', overflow: 'hidden' }}><Box sx={{ position: 'absolute', inset: 0, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', pr: 2, bgcolor: 'rgba(236,113,151,.16)', color: 'secondary.main' }}><DeleteOutlineRoundedIcon /></Box><ListItem disableGutters sx={{ position: 'relative', transform: `translateX(${offset}px)`, transition: offset === 0 ? 'transform .2s' : 'none', py: 1.7, px: 1, bgcolor: '#0d0a12', borderBottom: '1px solid rgba(255,255,255,.08)' }}><ListItemAvatar><Avatar sx={{ bgcolor: ['#ec7197', '#ffca5f', '#8f7bff'][index % 3], color: '#17101f', fontWeight: 700 }}>{index + 1}</Avatar></ListItemAvatar><ListItemText primary={song.title} secondary={`${song.requesterName} · ${song.status}`} primaryTypographyProps={{ fontWeight: 700 }} secondaryTypographyProps={{ color: 'text.secondary', sx: { textTransform: 'capitalize' } }} />{canDelete && <IconButton onClick={() => void removeSong()} disabled={deleting} aria-label={`delete ${song.title}`} color="secondary"><DeleteOutlineRoundedIcon /></IconButton>}</ListItem></Box>
 }
 
 export default JoinRoomPage;

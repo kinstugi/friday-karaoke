@@ -1,6 +1,7 @@
 import {
   addDoc,
   collection,
+  deleteDoc,
   doc,
   getDocs,
   onSnapshot,
@@ -102,6 +103,10 @@ export async function addHostParticipant(sessionId: string, nickname: string) {
   });
 }
 
+export async function deleteParticipant(sessionId: string, participantId: string) {
+  await deleteDoc(doc(db, 'sessions', sessionId, 'participants', participantId))
+}
+
 export function subscribeToParticipants(
   sessionId: string,
   onChange: (participants: SessionParticipant[]) => void,
@@ -169,6 +174,16 @@ export async function addSong(
       played: false,
       createdAt: serverTimestamp(),
     },
+  );
+}
+
+export async function deleteSong(
+  sessionId: string,
+  participantId: string,
+  songId: string,
+) {
+  await deleteDoc(
+    doc(db, "sessions", sessionId, "participants", participantId, "songs", songId),
   );
 }
 
