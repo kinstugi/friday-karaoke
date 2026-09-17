@@ -12,6 +12,7 @@ export type KaraokeSession = {
 }
 
 export type SessionParticipant = { id: string; nickname: string; joinedAt: Date | null; visibility: boolean; addedByHost?: boolean }
+export type SessionSong = { id: string; participantId: string; title: string; youtubeUrl: string; requesterName: string; createdAt: Date | null; played: boolean; status: 'queued' | 'playing' | 'done' }
 
 function createRoomCode() {
   return Math.random().toString(36).slice(2, 8).toUpperCase()
@@ -70,6 +71,32 @@ export function subscribeToParticipants(sessionId: string, onChange: (participan
 
 export async function setParticipantVisibility(sessionId: string, participantId: string, visibility: boolean) {
   await updateDoc(doc(db, 'sessions', sessionId, 'participants', participantId), { visibility, lastSeenAt: serverTimestamp() })
+}
+
+export async function addSong(sessionId: string, participantId: string, requesterName: string, title: string, youtubeUrl: string) {
+  return addDoc(collection(db, 'sessions', sessionId, 'participants', participantId, 'songs'), { sessionId, requesterId: participantId, requesterName: requesterName.trim(), title: title.trim(), youtubeUrl: youtubeUrl.trim(), status: 'queued', played: false, createdAt: serverTimestamp() })
+}
+
+export function subscribeToSongs(sessionId: string, onChange: (songs: SessionSong[]) => void, onError: (error: Error) => void): Unsubscribe {
+  return onSnapshot(collection(db, 'sessions', sessionId, 'queue'), (snapshot) => {
+    const songs = snapshot.docs.map((songDoc) => { const data = songDoc.data(); return { id: songDoc.id, participantId: data.participantId as string, title: data.title as string, youtubeUrl: data.youtubeUrl as string, requesterName: data.requesterName as string, status: data.status as SessionSong['status'], played: data.played === true, createdAt: data.createdAt?.toDate?.() ?? null } }).sort((a, b) => (a.createdAt?.getTime() ?? 0) - (b.createdAt?.getTime() ?? 0))
+    onChange(songs)
+  }, onError)
+}
+
+export function subscribeToParticipantSongs(sessionId: string, participantId: string, onChange: (songs: SessionSong[]) => void, onError: (error: Error) => void): Unsubscribe {
+  return onSnapshot(collection(db, 'sessions', sessionId, 'participants', participantId, 'songs'), (snapshot) => {
+    const songs = snapshot.docs.map((songDoc) => { const data = songDoc.data(); return { id: songDoc.id, participantId, title: data.title as string, youtubeUrl: data.youtubeUrl as string, requesterName: data.requesterName as string, status: data.status as SessionSong['status'], played: data.played === true, createdAt: data.createdAt?.toDate?.() ?? null } }).sort((a, b) => (a.createdAt?.getTime() ?? 0) - (b.createdAt?.getTime() ?? 0))
+    onChange(songs)
+  }, onError)
+}
+
+export function getQueueSongs(songs: SessionSong[]) {
+  const firstUnplayedByParticipant = new Map<string, SessionSong>()
+  for (const song of songs) {
+    if (!song.played && !firstUnplayedByParticipant.has(song.participantId)) firstUnplayedByParticipant.set(song.participantId, song)
+  }
+  return [...firstUnplayedByParticipant.values()].sort((a, b) => (a.createdAt?.getTime() ?? 0) - (b.createdAt?.getTime() ?? 0))
 }
 
 
