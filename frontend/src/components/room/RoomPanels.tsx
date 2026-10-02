@@ -66,7 +66,7 @@ export function QueuePanel({
           Queue note
         </Typography>
         <Typography variant="caption" color="text.secondary">
-          The queue is ordered by participant join time.
+          The queue follows the host’s singing order.
         </Typography>
       </Box>
     </Stack>

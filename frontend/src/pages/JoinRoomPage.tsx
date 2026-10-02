@@ -50,6 +50,7 @@ import {
 import { useParticipantSongs } from "../hooks/useParticipantSongs";
 import { useSessionParticipants } from "../hooks/useSessionParticipants";
 import { useSessionState } from "../hooks/useSessionState";
+import { fetchYoutubeTitle } from "../lib/youtube";
 
 function JoinRoomPage({ code, onBack }: { code: string; onBack: () => void }) {
   const { signInAnonymously } = useAuth();
@@ -277,13 +278,7 @@ function ParticipantRoom({
     setTitleLoading(true);
     setTitleFetchFailed(false);
     try {
-      const response = await fetch(
-        `https://www.youtube.com/oembed?url=${encodeURIComponent(songUrl.trim())}&format=json`,
-      );
-      if (!response.ok) throw new Error("Could not find video");
-      const data = (await response.json()) as { title?: string };
-      if (!data.title) throw new Error("Video title was not returned");
-      setSongTitle(data.title);
+      setSongTitle(await fetchYoutubeTitle(songUrl));
     } catch {
       setTitleFetchFailed(true);
     } finally {
@@ -412,7 +407,7 @@ function ParticipantRoom({
                 ? "This is your moment — give it everything."
                 : activeParticipant
                   ? "Keep the good vibes going — you’re coming up soon."
-                  : "Your place is based on the order you joined the room."}
+                  : "Your place follows the host’s singing order."}
             </Typography>
             <Box
               sx={{
@@ -457,7 +452,7 @@ function ParticipantRoom({
             </Typography>
             <Typography variant="body2" color="text.secondary">
               {tab === 0
-                ? "Your place in the singing order"
+                ? "The host can change this singing order"
                 : "Songs you added to this room"}
             </Typography>
           </Box>

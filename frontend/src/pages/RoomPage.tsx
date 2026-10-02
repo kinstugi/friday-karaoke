@@ -29,6 +29,7 @@ import { useSessionParticipants } from "../hooks/useSessionParticipants";
 import {
   deleteParticipant,
   markSongPlayed,
+  setParticipantOrder,
   setParticipantVisibility,
   setSessionNowSinging,
   subscribeToParticipantSongs,
@@ -352,9 +353,11 @@ function RoomPage({
               <ParticipantList
                 participants={orderedParticipants}
                 currentParticipantId={currentParticipantId}
-                onMove={(index, direction) =>
-                  setOrderedIds((ids) => moveItem(ids, index, direction))
-                }
+                onMove={(index, direction) => {
+                  const nextIds = moveItem(orderedIds, index, direction);
+                  setOrderedIds(nextIds);
+                  void setParticipantOrder(sessionId, nextIds);
+                }}
                 onToggle={(participant) =>
                   setParticipantVisibility(
                     sessionId,
@@ -480,7 +483,7 @@ function RoomPage({
         </Stack>
         <Divider sx={{ my: 3, borderColor: "rgba(255,255,255,.1)" }} />
         {panel === "queue" ? (
-          <QueuePanel participants={participants} />
+          <QueuePanel participants={orderedParticipants} />
         ) : panel === "guests" ? (
           <GuestsPanel participants={participants} sessionId={sessionId} />
         ) : (

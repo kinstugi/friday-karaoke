@@ -31,6 +31,7 @@ export type SessionParticipant = {
   joinedAt: Date | null;
   visibility: boolean;
   addedByHost?: boolean;
+  order: number | null;
 };
 export type SessionSong = {
   id: string;
@@ -149,15 +150,32 @@ export function subscribeToParticipants(
             joinedAt: data.joinedAt?.toDate?.() ?? null,
             visibility: data.visibility !== false,
             addedByHost: data.addedByHost === true,
+            order: typeof data.order === "number" ? data.order : null,
           };
         })
-        .sort(
-          (a, b) => (a.joinedAt?.getTime() ?? 0) - (b.joinedAt?.getTime() ?? 0),
-        );
+        .sort((a, b) => {
+          const aKey = a.order ?? a.joinedAt?.getTime() ?? 0;
+          const bKey = b.order ?? b.joinedAt?.getTime() ?? 0;
+          return aKey - bKey;
+        });
       onChange(participants);
     },
     onError,
   );
+}
+
+export async function setParticipantOrder(
+  sessionId: string,
+  orderedIds: string[],
+) {
+  const batch = writeBatch(db);
+  orderedIds.forEach((participantId, index) => {
+    batch.update(
+      doc(db, "sessions", sessionId, "participants", participantId),
+      { order: index },
+    );
+  });
+  await batch.commit();
 }
 
 export async function setParticipantVisibility(
